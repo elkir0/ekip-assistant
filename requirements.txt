@@ -1,0 +1,24 @@
+fastapi==0.115.0
+uvicorn[standard]==0.30.0
+websockets==13.0
+python-dotenv==1.0.0
+
+# Audio / Wake Word
+openwakeword>=0.6.0
+pyaudio==0.2.14
+numpy
+
+# STT
+deepgram-sdk>=3.7.0
+
+# LLM + TTS
+openai>=1.40.0
+
+# Musique
+spotipy>=2.24.0
+
+# Video
+yt-dlp>=2024.11.18
+
+# Meteo
+requests>=2.32.0

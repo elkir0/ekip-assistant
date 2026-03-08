@@ -1,0 +1,114 @@
+import { writable, derived } from 'svelte/store';
+
+export const currentPage = writable(0);
+export const assistantState = writable('IDLE');
+export const wsConnected = writable(false);
+export const transcript = writable('');
+export const musicData = writable({ playing: false });
+export const weatherData = writable(null);
+export const youtubeResults = writable([]);
+export const youtubeNowPlaying = writable(null);
+export const speakingText = writable('');
+export const volumeLevel = writable(50);
+export const musicQueue = writable([]);
+export const musicSearchResults = writable([]);
+export const musicPlaylists = writable([]);
+export const spotifyStatus = writable('ok');
+export const youtubeError = writable('');
+export const camerasData = writable([]);
+export const fullscreenCam = writable(null);
+
+let ws = null;
+
+export function connectWS() {
+  const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  const url = `${protocol}//${location.host}/ws`;
+
+  ws = new WebSocket(url);
+
+  ws.onopen = () => {
+    wsConnected.set(true);
+    console.log('[WS] Connecte');
+  };
+
+  ws.onmessage = (event) => {
+    const msg = JSON.parse(event.data);
+
+    switch (msg.type) {
+      case 'state':
+        assistantState.set(msg.data);
+        break;
+      case 'page':
+        currentPage.set(msg.data);
+        break;
+      case 'transcript':
+        transcript.set(msg.data.text);
+        break;
+      case 'music':
+        musicData.set(msg.data);
+        break;
+      case 'weather':
+        weatherData.set(msg.data);
+        break;
+      case 'youtube_results':
+        youtubeResults.set(msg.data);
+        break;
+      case 'youtube_playing':
+        youtubeNowPlaying.set(msg.data);
+        break;
+      case 'youtube_stopped':
+        youtubeNowPlaying.set(null);
+        if (msg.data && msg.data.error) {
+          youtubeError.set(msg.data.error);
+          setTimeout(() => youtubeError.set(''), 4000);
+        }
+        break;
+      case 'speaking':
+        speakingText.set(msg.data);
+        break;
+      case 'volume':
+        volumeLevel.set(msg.data);
+        break;
+      case 'music_queue':
+        musicQueue.set(msg.data);
+        break;
+      case 'music_search_results':
+        musicSearchResults.set(msg.data);
+        break;
+      case 'music_playlists':
+        musicPlaylists.set(msg.data);
+        break;
+      case 'spotify_status':
+        spotifyStatus.set(msg.data);
+        break;
+      case 'cameras_snapshots':
+        camerasData.set(msg.data);
+        break;
+      case 'camera_snapshot':
+        camerasData.update(cams => cams.map(c =>
+          c.id === msg.data.id ? { ...c, snapshot: msg.data.snapshot } : c
+        ));
+        fullscreenCam.update(cam =>
+          cam && cam.id === msg.data.id ? { ...cam, snapshot: msg.data.snapshot } : cam
+        );
+        break;
+      case 'cameras_list':
+        camerasData.set(msg.data);
+        break;
+    }
+  };
+
+  ws.onclose = () => {
+    wsConnected.set(false);
+    console.log('[WS] Deconnecte, reconnexion dans 3s...');
+    setTimeout(connectWS, 3000);
+  };
+
+  ws.onerror = () => ws.close();
+}
+
+export function sendWS(message) {
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify(message));
+  }
+}
