@@ -40,7 +40,7 @@ Born in **Guadeloupe**, built with love, and designed to run 24/7 on your nights
 - **4-page swipe interface** — Music, Weather, YouTube, Security Cameras
 - **Spotify Connect** — Streams music directly to high-end speakers (Devialet, Sonos, etc.)
 - **Weather forecasts** — Current conditions and 3-day forecast via Open-Meteo
-- **YouTube playback** — Voice or touch search, plays via VLC with audio routed to your speakers
+- **YouTube playback** — Voice or touch search, plays via VLC with audio routed to your speakers, cookie-based authentication to bypass bot detection
 - **Security cameras** — Live snapshots from UniFi Protect cameras on your local network
 - **Web admin panel** — Configure everything from your phone or laptop browser
 - **Dark theme** — Optimized for always-on displays, easy on the eyes at night
@@ -156,7 +156,7 @@ OPENAI_API_KEY=sk-...              # openai.com — used for STT, TTS, and LLM
 # Spotify
 SPOTIFY_CLIENT_ID=...              # developer.spotify.com
 SPOTIFY_CLIENT_SECRET=...
-SPOTIFY_REDIRECT_URI=http://127.0.0.1:8888/callback
+SPOTIFY_REDIRECT_URI=http://localhost:8000/api/spotify/callback
 SPOTIFY_DEVICE_NAME=Devialet       # Exact name of your Spotify Connect speaker
 
 # Weather (Open-Meteo is free, no key needed)
@@ -283,7 +283,7 @@ Features:
 - **Audio** — Microphone levels, PipeWire sink selection
 - **Music** — Spotify connection status, device selection
 - **Weather** — Location settings
-- **YouTube** — Playback settings
+- **YouTube** — Playback settings, cookie management (upload/paste cookies.txt to bypass YouTube bot detection), VLC buffer tuning
 - **Cameras** — UniFi Protect configuration
 - **Screen** — Brightness, sleep schedule
 - **System** — Logs, restart services
@@ -359,12 +359,20 @@ wpctl status                          # Check PipeWire/WirePlumber status
 **Spotify not connecting:**
 - Make sure you have Spotify Premium
 - Check that `SPOTIFY_DEVICE_NAME` in `.env` exactly matches your speaker name in the Spotify app
-- Run the backend once manually to complete the OAuth flow
+- If disconnected, the Music page shows a "Reconnecter" button that triggers OAuth re-authentication
+- Register `http://localhost:8000/api/spotify/callback` as a redirect URI in your Spotify Developer Dashboard
 
 **Wake word not triggering:**
 - Check microphone levels in the admin panel
 - Try lowering the threshold in `backend/audio/wakeword.py`
 - Re-record wake word samples using the admin panel
+
+**YouTube videos not playing:**
+- YouTube requires authenticated cookies to avoid bot detection
+- Go to the admin panel > YouTube and follow the tutorial to install cookies
+- Export cookies from a browser where you're logged into YouTube (use "Get cookies.txt LOCALLY" extension)
+- `deno` runtime is required for yt-dlp's JS challenge solver — install with `curl -fsSL https://deno.land/install.sh | sh`
+- Check logs with `journalctl -u piboard-backend -f` for specific yt-dlp errors
 
 **Screen not turning on/off:**
 ```bash

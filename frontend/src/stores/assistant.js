@@ -14,6 +14,7 @@ export const musicQueue = writable([]);
 export const musicSearchResults = writable([]);
 export const musicPlaylists = writable([]);
 export const spotifyStatus = writable('ok');
+export const spotifyReauthUrl = writable(null);
 export const youtubeError = writable('');
 export const camerasData = writable([]);
 export const fullscreenCam = writable(null);
@@ -80,6 +81,10 @@ export function connectWS() {
         break;
       case 'spotify_status':
         spotifyStatus.set(msg.data);
+        if (msg.data === 'ok') spotifyReauthUrl.set(null);
+        break;
+      case 'spotify_reauth_url':
+        spotifyReauthUrl.set(msg.data);
         break;
       case 'cameras_snapshots':
         camerasData.set(msg.data);

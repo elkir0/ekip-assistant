@@ -1,5 +1,5 @@
 <script>
-  import { musicData, assistantState, transcript, volumeLevel, musicQueue, musicSearchResults, musicPlaylists, spotifyStatus, sendWS } from '../stores/assistant.js';
+  import { musicData, assistantState, transcript, volumeLevel, musicQueue, musicSearchResults, musicPlaylists, spotifyStatus, spotifyReauthUrl, sendWS } from '../stores/assistant.js';
   import VirtualKeyboard from '../components/VirtualKeyboard.svelte';
 
   import { onMount, onDestroy } from 'svelte';
@@ -108,18 +108,51 @@
   $: if (track.playing && track.title !== 'En attente...') {
     refreshQueue();
   }
+
+  let retrying = false;
+  function retrySpotify() {
+    retrying = true;
+    sendWS({ type: 'spotify_retry' });
+    setTimeout(() => { retrying = false; }, 5000);
+  }
+
+  function reauthSpotify() {
+    // Navigate the kiosk directly to the backend reauth endpoint
+    window.location.href = '/api/spotify/reauth';
+  }
 </script>
 
 <div class="music-page">
   {#if $spotifyStatus !== 'ok'}
-    <div class="spotify-alert">
-      {#if $spotifyStatus === 'auth_required'}
-        Spotify non connecte — authentification requise
-      {:else if $spotifyStatus === 'no_credentials'}
-        Spotify non configure — cles API manquantes
-      {:else}
-        Spotify deconnecte
-      {/if}
+    <div class="spotify-recovery">
+      <div class="recovery-icon">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
+          <path d="M1 21h22L12 2 1 21zm12-3h-2v-2h2v2zm0-4h-2v-4h2v4z"/>
+        </svg>
+      </div>
+      <div class="recovery-text">
+        {#if $spotifyStatus === 'auth_required'}
+          <span class="recovery-title">Spotify deconnecte</span>
+          <span class="recovery-detail">Token expire — reconnexion necessaire</span>
+        {:else if $spotifyStatus === 'no_credentials'}
+          <span class="recovery-title">Spotify non configure</span>
+          <span class="recovery-detail">Cles API manquantes dans .env</span>
+        {:else}
+          <span class="recovery-title">Spotify indisponible</span>
+          <span class="recovery-detail">Connexion perdue</span>
+        {/if}
+      </div>
+      <div class="recovery-actions">
+        {#if $spotifyStatus === 'auth_required'}
+          <button class="recovery-btn primary" on:click={reauthSpotify}>
+            Reconnecter
+          </button>
+        {:else if $spotifyStatus !== 'no_credentials'}
+          <button class="recovery-btn" on:click={retrySpotify} disabled={retrying}>
+            {retrying ? 'Connexion...' : 'Reessayer'}
+          </button>
+        {/if}
+      </div>
     </div>
   {/if}
   {#if showSearch}
@@ -705,20 +738,72 @@
     white-space: nowrap;
   }
 
-  /* ──── Spotify alert ──── */
-  .spotify-alert {
+  /* ──── Spotify recovery banner ──── */
+  .spotify-recovery {
     position: absolute;
-    top: 40px;
-    left: 50%;
-    transform: translateX(-50%);
-    background: rgba(255, 68, 68, 0.15);
-    border: 1px solid rgba(255, 68, 68, 0.3);
+    top: 0;
+    left: 0;
+    right: 0;
+    background: rgba(255, 68, 68, 0.1);
+    border-bottom: 1px solid rgba(255, 68, 68, 0.25);
+    padding: 12px 20px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    z-index: 20;
+  }
+
+  .recovery-icon {
     color: #ff6b6b;
+    flex-shrink: 0;
+    display: flex;
+  }
+
+  .recovery-text {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+  }
+
+  .recovery-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: #ff6b6b;
+  }
+
+  .recovery-detail {
+    font-size: 11px;
+    color: #ff9999;
+  }
+
+  .recovery-actions {
+    flex-shrink: 0;
+    display: flex;
+    gap: 8px;
+  }
+
+  .recovery-btn {
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    color: #f0f0f0;
     font-size: 12px;
-    padding: 6px 16px;
-    border-radius: 8px;
-    z-index: 10;
-    white-space: nowrap;
+    font-weight: 500;
+    padding: 6px 14px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-family: 'Inter', sans-serif;
+    -webkit-tap-highlight-color: transparent;
+    transition: opacity 150ms;
+  }
+  .recovery-btn:active { opacity: 0.7; }
+  .recovery-btn:disabled { opacity: 0.4; cursor: default; }
+
+  .recovery-btn.primary {
+    background: rgba(108, 99, 255, 0.3);
+    border-color: rgba(108, 99, 255, 0.5);
+    color: #c4bfff;
   }
 
   /* ──── Playlists panel ──── */

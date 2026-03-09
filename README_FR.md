@@ -40,7 +40,7 @@ Ne en **Guadeloupe**, construit avec passion, et concu pour tourner 24h/24 sur v
 - **Interface swipe a 4 pages** — Musique, Meteo, YouTube, Cameras de securite
 - **Integration Spotify Connect** — Diffuse la musique directement sur vos enceintes haut de gamme (Devialet, Sonos, etc.)
 - **Previsions meteo** — Conditions actuelles et previsions 3 jours via Open-Meteo
-- **Lecture YouTube** — Recherche vocale ou tactile, lecture via VLC avec audio route vers vos enceintes
+- **Lecture YouTube** — Recherche vocale ou tactile, lecture via VLC avec audio route vers vos enceintes, authentification par cookies pour contourner la detection de bots
 - **Cameras de securite** — Snapshots en direct des cameras UniFi Protect sur votre reseau local
 - **Panneau d'administration web** — Configurez tout depuis votre telephone ou navigateur
 - **Theme sombre** — Optimise pour un affichage permanent, agreable la nuit

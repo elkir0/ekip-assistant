@@ -6,7 +6,7 @@ import shutil
 import subprocess
 from pathlib import Path
 
-from fastapi import APIRouter, Request, Response, HTTPException, Depends
+from fastapi import APIRouter, Request, Response, HTTPException, Depends, UploadFile, File
 from fastapi.responses import JSONResponse
 
 from admin.config_manager import config
@@ -554,4 +554,51 @@ async def update_env(request: Request, _token: str = Depends(require_auth)):
 
     ENV_PATH.write_text("\n".join(current_lines) + "\n", encoding="utf-8")
     logger.info("[ADMIN] .env mis a jour (%d entrees)", len(entries))
+    return {"ok": True}
+
+
+# --- YouTube Cookies ---
+
+YT_COOKIES_PATH = Path(__file__).parent.parent.parent / "yt-cookies.txt"
+
+
+@admin_router.get("/youtube/cookies")
+async def get_youtube_cookies_status(_token: str = Depends(require_auth)):
+    """Check if YouTube cookies file exists and return basic info."""
+    if not YT_COOKIES_PATH.exists():
+        return {"exists": False, "lines": 0, "youtube_cookies": 0}
+
+    text = YT_COOKIES_PATH.read_text(encoding="utf-8", errors="ignore")
+    lines = text.strip().split("\n")
+    yt_count = sum(1 for l in lines if "youtube.com" in l.lower())
+    return {
+        "exists": True,
+        "lines": len(lines),
+        "youtube_cookies": yt_count,
+        "size_kb": round(YT_COOKIES_PATH.stat().st_size / 1024, 1),
+    }
+
+
+@admin_router.post("/youtube/cookies")
+async def upload_youtube_cookies(request: Request, _token: str = Depends(require_auth)):
+    """Upload a cookies.txt file (Netscape format)."""
+    body = await request.body()
+    text = body.decode("utf-8", errors="ignore")
+
+    # Basic validation
+    if "# Netscape HTTP Cookie File" not in text and "youtube.com" not in text.lower():
+        raise HTTPException(status_code=400, detail="Format invalide — doit etre un fichier Netscape cookies.txt")
+
+    YT_COOKIES_PATH.write_text(text, encoding="utf-8")
+    yt_count = sum(1 for l in text.strip().split("\n") if "youtube.com" in l.lower())
+    logger.info("[ADMIN] Cookies YouTube mis a jour (%d cookies YouTube)", yt_count)
+    return {"ok": True, "youtube_cookies": yt_count}
+
+
+@admin_router.delete("/youtube/cookies")
+async def delete_youtube_cookies(_token: str = Depends(require_auth)):
+    """Delete the YouTube cookies file."""
+    if YT_COOKIES_PATH.exists():
+        YT_COOKIES_PATH.unlink()
+        logger.info("[ADMIN] Cookies YouTube supprimes")
     return {"ok": True}

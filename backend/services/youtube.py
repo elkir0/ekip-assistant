@@ -7,7 +7,17 @@ from typing import Any, Callable, Coroutine
 
 logger = logging.getLogger(__name__)
 
-YT_FORMAT = "bestvideo[height<=480][vcodec^=avc]+bestaudio/best[height<=480]"
+YT_FORMAT_DEFAULT = "bestvideo[height<=720][vcodec^=avc]+bestaudio/bestvideo[height<=720]+bestaudio/best[height<=720]/best"
+YT_COOKIES = os.path.join(os.path.dirname(__file__), '..', '..', 'yt-cookies.txt')
+
+
+def _get_yt_config() -> dict:
+    """Read YouTube config from admin config manager (lazy import)."""
+    try:
+        from admin.config_manager import config
+        return config.get_section("youtube")
+    except Exception:
+        return {}
 
 
 def _get_raop_sink() -> str:
@@ -55,10 +65,22 @@ class YouTubeController:
             return self._queue[self._queue_index + 1:]
         return []
 
-    async def search(self, query: str, limit: int = 5) -> list[dict[str, Any]]:
+    def _base_args(self) -> list[str]:
+        """Return common yt-dlp arguments (cookies + JS solver)."""
+        args = ["--remote-components", "ejs:github"]
+        if os.path.exists(YT_COOKIES):
+            args.extend(["--cookies", YT_COOKIES])
+        return args
+
+    async def search(self, query: str, limit: int = 0) -> list[dict[str, Any]]:
+        cfg = _get_yt_config()
+        if limit <= 0:
+            limit = cfg.get("search_limit", 5)
+        timeout = cfg.get("search_timeout_s", 15)
         try:
             proc = await asyncio.create_subprocess_exec(
                 "yt-dlp",
+                *self._base_args(),
                 f"ytsearch{limit}:{query}",
                 "--dump-json",
                 "--flat-playlist",
@@ -66,7 +88,7 @@ class YouTubeController:
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.DEVNULL,
             )
-            stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=15)
+            stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=timeout)
 
             import json
             results = []
@@ -103,13 +125,13 @@ class YouTubeController:
         self._on_finish_callback = on_finish
 
         try:
-            # Pause Spotify before playing YouTube
+            # Pause Spotify before playing YouTube (timeout to avoid rate limit block)
             if self._on_music_pause:
                 try:
-                    await self._on_music_pause()
+                    await asyncio.wait_for(self._on_music_pause(), timeout=3)
                     logger.info("[YOUTUBE] Spotify mis en pause")
-                except Exception as e:
-                    logger.warning("[YOUTUBE] Erreur pause Spotify: %s", e)
+                except (asyncio.TimeoutError, Exception) as e:
+                    logger.warning("[YOUTUBE] Pause Spotify skip: %s", e)
 
             return await self._launch_vlc(url)
 
@@ -125,53 +147,80 @@ class YouTubeController:
 
     async def _launch_vlc(self, url: str) -> dict:
         """Get stream URLs and launch VLC for a single video."""
+        cfg = _get_yt_config()
+        yt_format = cfg.get("format", YT_FORMAT_DEFAULT)
         proc = await asyncio.create_subprocess_exec(
             "yt-dlp",
-            "-f", YT_FORMAT,
+            "-f", yt_format,
             "--get-url",
+            *self._base_args(),
             url,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
-        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=20)
-        if stderr:
-            stderr_text = stderr.decode().strip()
-            if stderr_text and "WARNING" not in stderr_text:
-                logger.warning("[YOUTUBE] yt-dlp stderr: %s", stderr_text[:200])
-        stream_urls = stdout.decode().strip().split("\n")
+        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=30)
+        stderr_text = stderr.decode().strip() if stderr else ""
+        if stderr_text:
+            for line in stderr_text.split("\n"):
+                if "WARNING" not in line and line.strip():
+                    logger.warning("[YOUTUBE] yt-dlp: %s", line[:200])
 
-        if not stream_urls or not stream_urls[0]:
+        if proc.returncode != 0:
+            logger.error("[YOUTUBE] yt-dlp echoue (code %d) pour %s: %s", proc.returncode, url, stderr_text[:300])
+            return {"playing": False, "error": f"yt-dlp erreur (code {proc.returncode})"}
+
+        stream_urls = [u for u in stdout.decode().strip().split("\n") if u.startswith("http")]
+
+        if not stream_urls:
             logger.error("[YOUTUBE] yt-dlp n'a retourne aucune URL pour %s", url)
             return {"playing": False, "error": "Impossible d'obtenir l'URL"}
 
         sink_name = _get_raop_sink()
         logger.info("[YOUTUBE] Sink audio: %s, %d stream URLs", sink_name, len(stream_urls))
         env = {**os.environ, "PULSE_SINK": sink_name}
+        vlc_volume = cfg.get("vlc_volume", 256)
+        cache_ms = cfg.get("network_cache_ms", 5000)
         vlc_args = [
             "vlc",
             "--fullscreen",
             "--play-and-exit",
             "--aout=pulse",
-            "--volume=256",
+            f"--volume={vlc_volume}",
             "--no-video-title-show",
             "--quiet",
-            "--network-caching=3000",
-            "--file-caching=3000",
-            "--live-caching=3000",
+            f"--network-caching={cache_ms}",
+            f"--file-caching={cache_ms}",
+            f"--live-caching={cache_ms}",
             "--clock-jitter=0",
             "--avcodec-skiploopfilter=4",
         ]
         if len(stream_urls) >= 2 and stream_urls[1]:
             vlc_args.append(f"--input-slave={stream_urls[1]}")
         vlc_args.append(stream_urls[0])
+
+        logger.info("[YOUTUBE] Lancement VLC: %d args, video=%s", len(vlc_args), url)
         self._vlc_process = await asyncio.create_subprocess_exec(
             *vlc_args,
             stdout=asyncio.subprocess.DEVNULL,
-            stderr=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.PIPE,
             env=env,
         )
 
-        logger.info("[YOUTUBE] Lecture VLC: %s", url)
+        # Wait briefly to check VLC didn't die immediately
+        await asyncio.sleep(2)
+        if self._vlc_process.returncode is not None:
+            exit_code = self._vlc_process.returncode
+            vlc_err = ""
+            try:
+                vlc_stderr = await asyncio.wait_for(self._vlc_process.stderr.read(2000), timeout=1)
+                vlc_err = vlc_stderr.decode().strip()[:300]
+            except Exception:
+                pass
+            logger.error("[YOUTUBE] VLC mort immediatement (code %d): %s", exit_code, vlc_err)
+            self._vlc_process = None
+            return {"playing": False, "error": f"VLC echoue (code {exit_code})"}
+
+        logger.info("[YOUTUBE] VLC demarre OK (PID %d)", self._vlc_process.pid)
 
         # Watch for natural VLC exit → play next in queue
         asyncio.create_task(self._watch_vlc())
@@ -181,9 +230,26 @@ class YouTubeController:
     async def _watch_vlc(self):
         try:
             if self._vlc_process:
+                start_time = asyncio.get_event_loop().time()
                 await self._vlc_process.wait()
+                duration = asyncio.get_event_loop().time() - start_time
+                exit_code = self._vlc_process.returncode
                 self._vlc_process = None
-                logger.info("[YOUTUBE] VLC termine naturellement")
+
+                # If VLC died very fast, it's an error not a natural end
+                if duration < 5:
+                    logger.warning("[YOUTUBE] VLC termine trop vite (%.1fs, code %s) — skip", duration, exit_code)
+                    # Don't chain next, just clean up
+                    if self._on_music_resume:
+                        try:
+                            await asyncio.wait_for(self._on_music_resume(), timeout=3)
+                        except Exception:
+                            pass
+                    if self._on_finish_callback:
+                        await self._on_finish_callback()
+                    return
+
+                logger.info("[YOUTUBE] VLC termine naturellement (%.0fs)", duration)
 
                 # If stopped manually, don't play next
                 if self._stopped:
@@ -213,10 +279,10 @@ class YouTubeController:
                 logger.info("[YOUTUBE] Queue terminee")
                 if self._on_music_resume:
                     try:
-                        await self._on_music_resume()
+                        await asyncio.wait_for(self._on_music_resume(), timeout=3)
                         logger.info("[YOUTUBE] Spotify repris")
-                    except Exception as e:
-                        logger.warning("[YOUTUBE] Erreur reprise Spotify: %s", e)
+                    except (asyncio.TimeoutError, Exception) as e:
+                        logger.warning("[YOUTUBE] Reprise Spotify skip: %s", e)
                 if self._on_finish_callback:
                     await self._on_finish_callback()
         except Exception as e:
@@ -239,13 +305,13 @@ class YouTubeController:
         self._queue = []
         self._queue_index = 0
         await self._stop_vlc()
-        # Resume Spotify after stop
+        # Resume Spotify after stop (timeout to avoid rate limit block)
         if self._on_music_resume:
             try:
-                await self._on_music_resume()
+                await asyncio.wait_for(self._on_music_resume(), timeout=3)
                 logger.info("[YOUTUBE] Spotify repris")
-            except Exception as e:
-                logger.warning("[YOUTUBE] Erreur reprise Spotify: %s", e)
+            except (asyncio.TimeoutError, Exception) as e:
+                logger.warning("[YOUTUBE] Reprise Spotify skip: %s", e)
         return {"stopped": True}
 
     @property

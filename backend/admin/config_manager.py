@@ -51,11 +51,11 @@ DEFAULT_CONFIG = {
         "device_watch_interval_s": 30,
     },
     "youtube": {
-        "format": "bestvideo[height<=480][vcodec^=avc]+bestaudio/best[height<=480]",
+        "format": "bestvideo[height<=720][vcodec^=avc]+bestaudio/bestvideo[height<=720]+bestaudio/best[height<=720]/best",
         "search_limit": 5,
         "search_timeout_s": 15,
         "vlc_volume": 256,
-        "network_cache_ms": 3000,
+        "network_cache_ms": 5000,
         "stop_timeout_s": 3,
     },
     "weather": {

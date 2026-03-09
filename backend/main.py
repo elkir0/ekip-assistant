@@ -4,7 +4,7 @@ import json
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse, RedirectResponse
 from pathlib import Path
 
 from config import BACKEND_PORT, FRONTEND_BUILD_DIR
@@ -130,7 +130,9 @@ async def handle_youtube_play(query: str):
             else:
                 await speak(f"Je lance {title}")
         else:
-            logger.warning("[PIPELINE] YouTube play echoue: %s", play_result.get("error"))
+            error_msg = play_result.get("error", "Erreur inconnue")
+            logger.warning("[PIPELINE] YouTube play echoue: %s", error_msg)
+            await broadcast({"type": "youtube_stopped", "data": {"error": error_msg}})
             await speak("Desole, je n'ai pas pu lancer la video")
     else:
         await speak(f"Je n'ai rien trouve pour {query} sur YouTube")
@@ -191,25 +193,24 @@ async def speak(text: str):
     await broadcast({"type": "speaking", "data": text})
 
     # Duck Spotify volume via API (not PipeWire — TTS uses PipeWire)
-    # Save current volume to restore after TTS
+    # Save current volume to restore after TTS (timeout to avoid rate limit block)
     saved_spotify_vol = None
     try:
-        current = await music.get_current()
+        current = await asyncio.wait_for(music.get_current(), timeout=2)
         if current.get("playing"):
-            saved_spotify_vol = await music.get_spotify_volume()
-    except Exception:
+            saved_spotify_vol = await asyncio.wait_for(music.get_spotify_volume(), timeout=2)
+    except (asyncio.TimeoutError, Exception):
         pass
 
     async def duck(vol):
         nonlocal saved_spotify_vol
         try:
             if vol == 100:
-                # Restore to saved volume, not hardcoded 100%
                 restore_vol = saved_spotify_vol if saved_spotify_vol is not None else 70
-                await music.spotify_volume(restore_vol)
+                await asyncio.wait_for(music.spotify_volume(restore_vol), timeout=2)
             else:
-                await music.spotify_volume(vol)
-        except Exception:
+                await asyncio.wait_for(music.spotify_volume(vol), timeout=2)
+        except (asyncio.TimeoutError, Exception):
             pass
 
     await tts.speak(text, duck_callback=duck)
@@ -259,16 +260,16 @@ async def on_wake():
     if wake_detector:
         wake_detector.paused = True
 
-    # Duck music immediately so the mic hears the user clearly
+    # Duck music immediately so the mic hears the user clearly (timeout to avoid rate limit block)
     _wake_saved_vol = None
     try:
-        current = await music.get_current()
+        current = await asyncio.wait_for(music.get_current(), timeout=2)
         if current.get("playing"):
-            _wake_saved_vol = await music.get_spotify_volume()
+            _wake_saved_vol = await asyncio.wait_for(music.get_spotify_volume(), timeout=2)
             duck_vol = max(10, (_wake_saved_vol or 50) // 2)
-            await music.spotify_volume(duck_vol)
+            await asyncio.wait_for(music.spotify_volume(duck_vol), timeout=2)
             logger.info("[PIPELINE] Musique duckee %d%% -> %d%%", _wake_saved_vol or 50, duck_vol)
-    except Exception:
+    except (asyncio.TimeoutError, Exception):
         pass
 
     await set_state("LISTENING")
@@ -309,9 +310,9 @@ async def on_wake():
     # Restore music volume if we ducked it at wake
     if _wake_saved_vol is not None:
         try:
-            await music.spotify_volume(_wake_saved_vol)
+            await asyncio.wait_for(music.spotify_volume(_wake_saved_vol), timeout=2)
             logger.info("[PIPELINE] Volume restaure %d%%", _wake_saved_vol)
-        except Exception:
+        except (asyncio.TimeoutError, Exception):
             pass
 
     # Return to IDLE
@@ -336,22 +337,19 @@ async def voice_pipeline():
 wake_detector = None
 
 screen_sleeping = False
+volume_manual_override = False  # True when user changes volume manually
 
 async def screen_scheduler():
     """Auto sleep 22h-6h, night volume 30% 20h-8h. Each action fires once per transition."""
     from datetime import datetime
+    global screen_sleeping, volume_manual_override
 
     # Initialize state based on current time (avoid re-triggering on restart)
     hour = datetime.now().hour
     was_sleep = hour >= 22 or hour < 6
     was_quiet = hour >= 20 or hour < 8
-    global screen_sleeping
 
-    # Apply initial state
-    if was_quiet:
-        await music.set_volume(30)
-        await broadcast({"type": "volume", "data": 30})
-        logger.info("[VOLUME] Demarrage en mode nuit 30%%")
+    # Apply initial state (only volume hint, don't force — user may have set it)
     if was_sleep:
         await screen_off()
         screen_sleeping = True
@@ -363,15 +361,19 @@ async def screen_scheduler():
         in_sleep = hour >= 22 or hour < 6
         in_quiet = hour >= 20 or hour < 8
 
-        # Volume transitions
-        if in_quiet and not was_quiet:
-            await music.set_volume(30)
-            await broadcast({"type": "volume", "data": 30})
-            logger.info("[VOLUME] Mode nuit 30%%")
-        elif not in_quiet and was_quiet:
-            await music.set_volume(50)
-            await broadcast({"type": "volume", "data": 50})
-            logger.info("[VOLUME] Mode jour 50%%")
+        # Volume transitions (skip if user overrode manually)
+        if not volume_manual_override:
+            if in_quiet and not was_quiet:
+                await music.set_volume(30)
+                await broadcast({"type": "volume", "data": 30})
+                logger.info("[VOLUME] Mode nuit 30%%")
+            elif not in_quiet and was_quiet:
+                await music.set_volume(50)
+                await broadcast({"type": "volume", "data": 50})
+                logger.info("[VOLUME] Mode jour 50%%")
+        # Reset override on period transition so next auto-change works
+        if in_quiet != was_quiet:
+            volume_manual_override = False
         was_quiet = in_quiet
 
         # Screen transitions
@@ -388,10 +390,21 @@ async def screen_scheduler():
 
 # --- App lifecycle ---
 
+async def _start_spotify():
+    """Start Spotify in background so rate limits don't block server startup."""
+    try:
+        await music.start()
+    except Exception as e:
+        logger.error("[SPOTIFY] Erreur au demarrage: %s", e)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("[PI-BOARD] Demarrage des services...")
-    await music.start()
+    # Wire broadcast so Spotify can push status changes to frontend
+    music.set_broadcast(broadcast)
+    # Start Spotify in background — don't block server startup on rate limits
+    asyncio.create_task(_start_spotify())
     await cameras.start()
     await llm.start()
     await tts.start()
@@ -427,19 +440,20 @@ async def websocket_endpoint(ws: WebSocket):
     connected_clients.append(ws)
     logger.info("[WS] Client connecte (%d total)", len(connected_clients))
     await ws.send_json({"type": "state", "data": assistant_state})
-    # Send Spotify status on connect
-    spotify_status = music.status
-    if spotify_status != "ok":
-        await ws.send_json({"type": "spotify_status", "data": spotify_status})
-    # Send current volume
-    vol = await music.get_volume()
-    await ws.send_json({"type": "volume", "data": vol})
-    # Send current music state (if playing)
-    current = await music.get_current()
-    if current.get("playing"):
-        await ws.send_json({"type": "music", "data": current})
-        queue = await music.get_queue()
-        await ws.send_json({"type": "music_queue", "data": queue})
+    # Send Spotify status on connect (with timeout — don't block WS on rate limits)
+    try:
+        spotify_status = music.status
+        if spotify_status != "ok":
+            await ws.send_json({"type": "spotify_status", "data": spotify_status})
+        vol = await asyncio.wait_for(music.get_volume(), timeout=3)
+        await ws.send_json({"type": "volume", "data": vol})
+        current = await asyncio.wait_for(music.get_current(), timeout=3)
+        if current.get("playing"):
+            await ws.send_json({"type": "music", "data": current})
+            queue = await asyncio.wait_for(music.get_queue(), timeout=3)
+            await ws.send_json({"type": "music_queue", "data": queue})
+    except (asyncio.TimeoutError, Exception) as e:
+        logger.warning("[WS] Spotify status indisponible: %s", e)
 
     try:
         while True:
@@ -471,9 +485,11 @@ async def websocket_endpoint(ws: WebSocket):
                 current = await music.get_current()
                 await broadcast({"type": "music", "data": current})
             elif msg.get("type") == "music_volume":
+                global volume_manual_override
                 vol = int(msg.get("data", 50))
                 await music.set_volume(vol)
                 await broadcast({"type": "volume", "data": vol})
+                volume_manual_override = True
             elif msg.get("type") == "music_search":
                 query = msg.get("data", "")
                 results = await music.search_tracks(query)
@@ -501,6 +517,18 @@ async def websocket_endpoint(ws: WebSocket):
                 await asyncio.sleep(1)
                 queue = await music.get_queue()
                 await broadcast({"type": "music_queue", "data": queue})
+            elif msg.get("type") == "spotify_reauth":
+                url = music.get_auth_url()
+                if url:
+                    await ws.send_json({"type": "spotify_reauth_url", "data": url})
+            elif msg.get("type") == "spotify_retry":
+                # Retry Spotify connection (e.g. after network issue, no full re-auth)
+                await music.start()
+                status = music.status
+                await broadcast({"type": "spotify_status", "data": status})
+                if status == "ok":
+                    vol = await music.get_volume()
+                    await broadcast({"type": "volume", "data": vol})
             elif msg.get("type") == "youtube_search":
                 query = msg.get("data", "")
                 if query and len(query) >= 2:
@@ -565,6 +593,44 @@ async def api_weather():
 @app.get("/api/spotify/current")
 async def api_spotify_current():
     return await music.get_current()
+
+
+@app.get("/api/spotify/reauth")
+async def api_spotify_reauth():
+    """Generate Spotify OAuth URL and redirect the browser to it."""
+    url = music.get_auth_url()
+    if not url:
+        return JSONResponse({"error": "Spotify non configure"}, status_code=400)
+    return RedirectResponse(url)
+
+
+@app.get("/api/spotify/callback")
+async def api_spotify_callback(code: str = ""):
+    """Handle Spotify OAuth callback, then redirect back to the app."""
+    if not code:
+        return JSONResponse({"error": "Code manquant"}, status_code=400)
+    success = await music.handle_callback(code)
+    if success:
+        # Redirect back to the main app — kiosk will show the music page
+        return RedirectResponse("/")
+    return JSONResponse({"error": "Echec authentification Spotify"}, status_code=500)
+
+
+@app.get("/api/youtube/login")
+async def api_youtube_login():
+    """Redirect kiosk to YouTube for login, auto-return after 90s."""
+    async def _auto_return():
+        await asyncio.sleep(90)
+        logger.info("[YOUTUBE] Auto-retour kiosk apres login")
+        proc = await asyncio.create_subprocess_exec(
+            "sudo", "systemctl", "restart", "piboard-kiosk",
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+        await proc.wait()
+
+    asyncio.create_task(_auto_return())
+    return RedirectResponse("https://www.youtube.com")
 
 
 @app.get("/api/cameras/{camera_id}/stream")

@@ -25,9 +25,17 @@ class MusicController:
     def __init__(self):
         self._sp = None
         self._device_id = None
+        self._broadcast_fn = None  # Set by main.py to broadcast status changes
+        self._status_override = None  # Force a status (e.g. after auth error)
+
+    def set_broadcast(self, fn):
+        """Set the broadcast function for pushing status updates to frontend."""
+        self._broadcast_fn = fn
 
     @property
     def status(self) -> str:
+        if self._status_override:
+            return self._status_override
         if not HAS_SPOTIPY or not SPOTIFY_CLIENT_ID:
             return "no_credentials"
         if not self._sp:
@@ -36,6 +44,70 @@ class MusicController:
         if not os.path.exists(cache_path):
             return "auth_required"
         return "ok"
+
+    async def _broadcast_status(self):
+        """Push current status to all connected clients."""
+        if self._broadcast_fn:
+            try:
+                await self._broadcast_fn({"type": "spotify_status", "data": self.status})
+            except Exception:
+                pass
+
+    async def _handle_api_error(self, e: Exception):
+        """Detect auth failures and broadcast status change."""
+        err_str = str(e).lower()
+        if any(k in err_str for k in ["invalid_grant", "token revoked", "expired", "401", "access token"]):
+            logger.warning("[SPOTIFY] Auth invalide detectee — passage en auth_required")
+            self._status_override = "auth_required"
+            self._sp = None
+            # Delete stale cache
+            cache_path = os.path.join(os.path.dirname(__file__), '..', '..', '.spotify_cache')
+            if os.path.exists(cache_path):
+                os.remove(cache_path)
+                logger.info("[SPOTIFY] Cache OAuth supprime")
+            await self._broadcast_status()
+
+    def get_auth_url(self) -> str | None:
+        """Generate Spotify OAuth URL for re-authentication."""
+        if not HAS_SPOTIPY or not SPOTIFY_CLIENT_ID:
+            return None
+        auth = SpotifyOAuth(
+            client_id=SPOTIFY_CLIENT_ID,
+            client_secret=SPOTIFY_CLIENT_SECRET,
+            redirect_uri=SPOTIFY_REDIRECT_URI,
+            scope="user-modify-playback-state user-read-playback-state user-read-currently-playing playlist-read-private playlist-read-collaborative",
+            cache_path=os.path.join(os.path.dirname(__file__), '..', '..', '.spotify_cache'),
+        )
+        return auth.get_authorize_url()
+
+    async def handle_callback(self, code: str) -> bool:
+        """Handle OAuth callback code, create client, broadcast ok status."""
+        if not HAS_SPOTIPY or not SPOTIFY_CLIENT_ID:
+            return False
+        loop = asyncio.get_event_loop()
+        try:
+            def _exchange(code):
+                auth = SpotifyOAuth(
+                    client_id=SPOTIFY_CLIENT_ID,
+                    client_secret=SPOTIFY_CLIENT_SECRET,
+                    redirect_uri=SPOTIFY_REDIRECT_URI,
+                    scope="user-modify-playback-state user-read-playback-state user-read-currently-playing playlist-read-private playlist-read-collaborative",
+                    cache_path=os.path.join(os.path.dirname(__file__), '..', '..', '.spotify_cache'),
+                )
+                auth.get_access_token(code)
+                return spotipy.Spotify(auth_manager=auth)
+
+            self._sp = await loop.run_in_executor(None, _exchange, code)
+            self._status_override = None
+            logger.info("[SPOTIFY] Re-authentification reussie")
+            await self._find_device()
+            if not self._device_id:
+                asyncio.create_task(self._device_watcher())
+            await self._broadcast_status()
+            return True
+        except Exception as e:
+            logger.error("[SPOTIFY] Erreur callback OAuth: %s", e)
+            return False
 
     async def start(self):
         if not HAS_SPOTIPY or not SPOTIFY_CLIENT_ID:
@@ -196,6 +268,7 @@ class MusicController:
 
         except Exception as e:
             logger.error("[SPOTIFY] Erreur play: %s", e)
+            await self._handle_api_error(e)
             return {"error": str(e), "playing": False}
 
     async def search_tracks(self, query: str, limit: int = 10) -> list[dict]:
@@ -219,6 +292,7 @@ class MusicController:
             ]
         except Exception as e:
             logger.error("[SPOTIFY] Erreur search: %s", e)
+            await self._handle_api_error(e)
             return []
 
     async def play_uri(self, uri: str) -> dict:
@@ -406,6 +480,7 @@ class MusicController:
             }
         except Exception as e:
             logger.error("[SPOTIFY] Erreur current: %s", e)
+            await self._handle_api_error(e)
             return {"playing": False}
 
     async def get_playlists(self) -> list[dict]:
@@ -429,6 +504,7 @@ class MusicController:
             ]
         except Exception as e:
             logger.error("[SPOTIFY] Erreur playlists: %s", e)
+            await self._handle_api_error(e)
             return []
 
     async def play_playlist(self, playlist_uri: str) -> dict:

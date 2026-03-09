@@ -285,6 +285,7 @@
     font-style: italic;
   }
 
+
   /* SEARCH MODE */
   .search-header {
     display: flex;

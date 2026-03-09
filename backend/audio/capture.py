@@ -6,15 +6,8 @@ logger = logging.getLogger(__name__)
 
 TARGET_RATE = 16000
 CHANNELS = 1
-CHUNK = 1024
-FORMAT_WIDTH = 2  # 16-bit
-
-try:
-    import pyaudio
-    HAS_PYAUDIO = True
-except ImportError:
-    HAS_PYAUDIO = False
-    logger.warning("[AUDIO] PyAudio non disponible — mode mock actif")
+CHUNK_SAMPLES = 1024  # samples per chunk at TARGET_RATE
+CAPTURE_RATE = 48000  # native mic rate, resampled to TARGET_RATE
 
 
 def resample(data: np.ndarray, src_rate: int, dst_rate: int) -> np.ndarray:
@@ -22,7 +15,6 @@ def resample(data: np.ndarray, src_rate: int, dst_rate: int) -> np.ndarray:
         return data
     from math import gcd
     from scipy.signal import resample_poly
-    # resample_poly does proper anti-aliasing filter before decimation
     g = gcd(src_rate, dst_rate)
     up = dst_rate // g
     down = src_rate // g
@@ -34,10 +26,7 @@ class AudioCapture:
     def __init__(self, device_name: str = "AI-Voice"):
         self.device_name = device_name
         self.running = False
-        self._stream = None
-        self._pa = None
-        self._device_index = None
-        self._device_rate = TARGET_RATE
+        self._process: asyncio.subprocess.Process | None = None
         self._listeners: list[asyncio.Queue] = []
 
     def subscribe(self) -> asyncio.Queue:
@@ -49,118 +38,91 @@ class AudioCapture:
         if q in self._listeners:
             self._listeners.remove(q)
 
-    def _find_device(self) -> int | None:
-        if not HAS_PYAUDIO:
-            return None
-        self._pa = pyaudio.PyAudio()
-
-        # Try exact match first, then partial match
-        for i in range(self._pa.get_device_count()):
-            info = self._pa.get_device_info_by_index(i)
-            if info["maxInputChannels"] > 0:
-                name = info["name"]
-                if self.device_name.lower() in name.lower():
-                    self._device_rate = int(info["defaultSampleRate"])
-                    logger.info("[AUDIO] Trouve: %s (index %d, rate=%d)", name, i, self._device_rate)
-                    return i
-
-        # Fallback: first USB input device
-        for i in range(self._pa.get_device_count()):
-            info = self._pa.get_device_info_by_index(i)
-            if info["maxInputChannels"] > 0 and "usb" in info["name"].lower():
-                self._device_rate = int(info["defaultSampleRate"])
-                logger.info("[AUDIO] Fallback USB: %s (index %d, rate=%d)", info["name"], i, self._device_rate)
-                return i
-
-        logger.warning("[AUDIO] Aucun micro USB trouve, utilise default")
+    def _find_alsa_device(self) -> str | None:
+        """Find ALSA device name for the USB mic."""
+        import subprocess
+        try:
+            result = subprocess.run(
+                ["arecord", "-l"], capture_output=True, text=True, timeout=5,
+            )
+            for line in result.stdout.split("\n"):
+                if self.device_name.lower() in line.lower() or "usb" in line.lower():
+                    # Parse "card 3: AI-Voice [AI-Voice], device 0: USB Audio [USB Audio]"
+                    parts = line.split(":")
+                    if len(parts) >= 2:
+                        card = parts[0].split()[-1]  # card number
+                        logger.info("[AUDIO] Trouve: %s (card %s)", line.strip(), card)
+                        return f"hw:{card},0"
+        except Exception as e:
+            logger.warning("[AUDIO] Erreur detection micro: %s", e)
         return None
 
     async def start(self):
         self.running = True
 
-        # Retry finding mic up to 5 times (USB mic may not be ready at boot)
-        for attempt in range(5):
-            self._device_index = self._find_device()
-            if HAS_PYAUDIO and self._pa:
-                # Try opening at 16kHz first (no resampling needed)
-                opened = False
-                for try_rate in [TARGET_RATE, self._device_rate]:
-                    try:
-                        self._stream = self._pa.open(
-                            format=pyaudio.paInt16,
-                            channels=CHANNELS,
-                            rate=try_rate,
-                            input=True,
-                            input_device_index=self._device_index,
-                            frames_per_buffer=CHUNK,
-                        )
-                        self._device_rate = try_rate
-                        opened = True
-                        break
-                    except Exception as e:
-                        if try_rate == TARGET_RATE:
-                            logger.info("[AUDIO] 16kHz non supporte, essai %dHz", self._device_rate)
-                        else:
-                            raise e
-                if opened:
-                    logger.info("[AUDIO] Capture demarree (device=%s, rate=%d, resample=%s)",
-                               self._device_index, self._device_rate,
-                               "oui" if self._device_rate != TARGET_RATE else "non")
-                    await self._read_loop()
-                    return
-            else:
-                if attempt < 4:
-                    logger.info("[AUDIO] Micro non trouve, retry dans 5s (tentative %d/5)", attempt + 1)
-                    await asyncio.sleep(5)
-                    continue
-
-            # Cleanup before retry
-            if self._pa:
+        # Retry finding mic up to 10 times (USB mic may not be ready at boot)
+        for attempt in range(10):
+            device = self._find_alsa_device()
+            if device:
                 try:
-                    self._pa.terminate()
-                except Exception:
-                    pass
-                self._pa = None
-            if attempt < 4:
-                logger.error("[AUDIO] Erreur ouverture stream (tentative %d/5)", attempt + 1)
-                await asyncio.sleep(5)
+                    await self._start_arecord(device)
+                    return
+                except Exception as e:
+                    logger.warning("[AUDIO] Erreur ouverture %s: %s", device, e)
 
-        logger.warning("[AUDIO] Micro introuvable apres 5 tentatives — mode mock")
+            if attempt < 9:
+                wait = 5 if attempt < 5 else 10
+                logger.info("[AUDIO] Micro non trouve, retry dans %ds (tentative %d/10)", wait, attempt + 1)
+                await asyncio.sleep(wait)
+
+        logger.warning("[AUDIO] Micro introuvable apres 10 tentatives — mode mock")
         await self._mock_loop()
 
-    async def _read_loop(self):
-        loop = asyncio.get_event_loop()
-        error_count = 0
-        while self.running:
-            try:
-                data = await loop.run_in_executor(
-                    None, self._stream.read, CHUNK, False
-                )
-                chunk = np.frombuffer(data, dtype=np.int16)
-                error_count = 0
+    async def _start_arecord(self, device: str):
+        """Start arecord subprocess and read audio data."""
+        # Compute bytes per chunk: we read at CAPTURE_RATE and resample to TARGET_RATE
+        # Read bigger chunks at capture rate, then resample
+        capture_chunk = CHUNK_SAMPLES * CAPTURE_RATE // TARGET_RATE  # 3072 samples at 48kHz
+        bytes_per_read = capture_chunk * 2  # 16-bit = 2 bytes per sample
 
-                # Resample to 16kHz if needed
-                if self._device_rate != TARGET_RATE:
-                    chunk = resample(chunk, self._device_rate, TARGET_RATE)
+        self._process = await asyncio.create_subprocess_exec(
+            "arecord",
+            "-D", device,
+            "-f", "S16_LE",
+            "-r", str(CAPTURE_RATE),
+            "-c", "1",
+            "-t", "raw",
+            "--buffer-size", str(capture_chunk * 4),
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+        logger.info("[AUDIO] Capture demarree via arecord (device=%s, rate=%d, resample=oui)", device, CAPTURE_RATE)
+
+        try:
+            while self.running and self._process.returncode is None:
+                data = await self._process.stdout.read(bytes_per_read)
+                if not data:
+                    break
+
+                chunk = np.frombuffer(data, dtype=np.int16)
+                # Resample 48kHz -> 16kHz
+                chunk = resample(chunk, CAPTURE_RATE, TARGET_RATE)
 
                 for q in self._listeners:
                     try:
                         q.put_nowait(chunk)
                     except asyncio.QueueFull:
                         pass
-            except Exception as e:
-                error_count += 1
-                logger.error("[AUDIO] Erreur lecture: %s", e)
-                if error_count > 5:
-                    logger.warning("[AUDIO] Trop d'erreurs, bascule en mode mock")
-                    try:
-                        self._stream.stop_stream()
-                        self._stream.close()
-                    except Exception:
-                        pass
-                    await self._mock_loop()
-                    return
-                await asyncio.sleep(0.5)
+        except Exception as e:
+            logger.error("[AUDIO] Erreur lecture: %s", e)
+        finally:
+            if self._process and self._process.returncode is None:
+                self._process.terminate()
+                try:
+                    await asyncio.wait_for(self._process.wait(), timeout=3)
+                except asyncio.TimeoutError:
+                    self._process.kill()
+            logger.info("[AUDIO] arecord termine")
 
     async def _mock_loop(self):
         while self.running:
@@ -174,12 +136,10 @@ class AudioCapture:
 
     async def stop(self):
         self.running = False
-        if self._stream:
+        if self._process and self._process.returncode is None:
+            self._process.terminate()
             try:
-                self._stream.stop_stream()
-                self._stream.close()
-            except Exception:
-                pass
-        if self._pa:
-            self._pa.terminate()
+                await asyncio.wait_for(self._process.wait(), timeout=3)
+            except asyncio.TimeoutError:
+                self._process.kill()
         logger.info("[AUDIO] Capture arretee")

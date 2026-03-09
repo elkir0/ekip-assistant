@@ -9,7 +9,7 @@ User=pi
 Environment=XDG_RUNTIME_DIR=/run/user/1000
 Environment=WAYLAND_DISPLAY=wayland-0
 ExecStartPre=/bin/sleep 5
-ExecStart=/usr/bin/chromium-browser --kiosk --noerrdialogs --disable-infobars --disable-session-crashed-bubble --disable-translate --no-first-run --start-fullscreen --autoplay-policy=no-user-gesture-required --ozone-platform=wayland --password-store=basic --disable-http-cache http://localhost:8000
+ExecStart=/usr/bin/chromium-browser --kiosk --noerrdialogs --disable-infobars --disable-session-crashed-bubble --disable-translate --no-first-run --start-fullscreen --autoplay-policy=no-user-gesture-required --ozone-platform=wayland --enable-wayland-ime --gtk-version=4 --password-store=basic --disable-http-cache http://localhost:8000
 Restart=on-failure
 RestartSec=10
 
