@@ -2,14 +2,14 @@
 <p align="center">
 
 ```
- _____ _  _____ ____
-| ____| |/ /_ _|  _ \
-|  _| | ' / | || |_) |
-| |___| . \ | ||  __/
-|_____|_|\_\___|_|       ASSISTANT
+ ____  _ ____                      _
+|  _ \(_) __ )  ___   __ _ _ __ __| |
+| |_) | |  _ \ / _ \ / _` | '__/ _` |
+|  __/| | |_) | (_) | (_| | | | (_| |
+|_|   |_|____/ \___/ \__,_|_|  \__,_|
 ```
 
-**Un assistant vocal DIY avec ecran tactile sur Raspberry Pi**
+**Votre maison merite une voix. Construisez-la vous-meme.**
 
 </p>
 
@@ -29,25 +29,25 @@
 
 ---
 
-Ekip Assistant est une **alternative open-source et respectueuse de la vie privee a l'Amazon Echo Show**. Construit sur un Raspberry Pi 4 avec un ecran tactile 7", il repond a votre voix et a vos gestes. Pas de dependance cloud pour les fonctionnalites de base — uniquement des appels API cibles pour la reconnaissance vocale, la musique et la meteo.
+**Piboard** est un ecran intelligent open-source qui transforme un Raspberry Pi en assistant vocal de salon. Un Amazon Echo Show — mais que vous possedez, comprenez, et personnalisez comme vous voulez.
 
-Ne en **Guadeloupe**, construit avec passion, et concu pour tourner 24h/24 sur votre table de nuit ou votre plan de cuisine.
+Dites *"Hey Piboard, mets du jazz"* et il lance du jazz sur votre Devialet. Demandez la meteo et il la lit a voix haute en basculant sur la page meteo. Dites-lui de mettre une video YouTube et il la diffuse en plein ecran avec le son envoye sans fil a vos enceintes via AirPlay.
 
-## Fonctionnalites
+Pas d'abonnement. Pas de dependance cloud. Juste un Pi, un ecran et votre voix.
 
-- **Mot de reveil personnalise** — Entrainez un mot de reveil avec VOTRE voix grace a EfficientWord-Net (fallback : openWakeWord)
-- **Commandes vocales en francais** — "Hey Ekip, mets du jazz" et ca joue du jazz sur vos enceintes
-- **Interface swipe a 4 pages** — Musique, Meteo, YouTube, Cameras de securite
-- **Integration Spotify Connect** — Diffuse la musique directement sur vos enceintes haut de gamme (Devialet, Sonos, etc.)
-- **Previsions meteo** — Conditions actuelles et previsions 3 jours via Open-Meteo
-- **Lecture YouTube** — Recherche vocale ou tactile, lecture via VLC avec audio route vers vos enceintes, authentification par cookies pour contourner la detection de bots
-- **Cameras de securite** — Snapshots en direct des cameras UniFi Protect sur votre reseau local
-- **Panneau d'administration web** — Configurez tout depuis votre telephone ou navigateur
-- **Theme sombre** — Optimise pour un affichage permanent, agreable la nuit
-- **Veille/reveil automatique** — L'ecran s'eteint a 22h, se rallume a 6h, volume nuit des 20h
-- **Speech-to-Text** — OpenAI GPT-4o-transcribe pour une transcription francaise precise
-- **Text-to-Speech** — OpenAI TTS pour des reponses vocales naturelles
-- **Ducking audio intelligent** — Le volume baisse quand l'assistant parle, puis remonte
+Ne en **Guadeloupe**, concu pour tourner 24h/24 sur votre table de nuit ou plan de cuisine.
+
+## Pourquoi Piboard ?
+
+- **Audio hi-fi sans fil** — La musique et les videos envoient le son a n'importe quelle enceinte AirPlay ou Spotify Connect (Devialet, Sonos, HomePod...) via le sink RAOP de PipeWire. Le Pi ne touche jamais l'audio — vos enceintes s'en chargent.
+- **Integration Spotify Connect** — Recherche vocale, controle de lecture, navigation dans les playlists. L'audio va directement des serveurs Spotify a votre enceinte — zero perte de qualite.
+- **YouTube sur vos enceintes** — Recherche vocale ou tactile, lecture VLC plein ecran, audio route vers vos enceintes hi-fi en AirPlay. Gestion de file d'attente avec enchainement automatique.
+- **Interaction vocale reelle** — Mot de reveil entraine avec VOTRE voix. Transcription OpenAI, reponses TTS naturelles, ducking audio qui baisse la musique quand l'assistant parle.
+- **Interface tactile 4 pages** — Swipez entre Musique, Meteo, YouTube et Cameras. Theme sombre optimise pour ecran 7" toujours allume.
+- **Cameras de securite** — Snapshots en direct de vos cameras UniFi Protect sur votre table de nuit.
+- **Panneau d'admin complet** — Configurez tout depuis votre telephone : sensibilite du micro, routage audio, Spotify, cookies YouTube, planning ecran, et plus encore.
+- **Veille intelligente** — Ecran eteint a 22h, rallume a 6h. Volume nuit des 20h. Luminosite adaptative.
+- **100% open source** — Licence MIT, pas de firmware proprietaire, pas de dependance constructeur.
 
 ## Captures d'ecran
 
@@ -55,36 +55,42 @@ Ne en **Guadeloupe**, construit avec passion, et concu pour tourner 24h/24 sur v
 |:-------:|:-----:|:-------:|
 | ![Musique](docs/screenshots/music.png) | ![Meteo](docs/screenshots/weather.png) | ![YouTube](docs/screenshots/youtube.png) |
 
-## Architecture
+## Comment ca marche
 
 ```
-Chromium Kiosk (plein ecran, port 8000)
-  +-- Svelte SPA <--> WebSocket <--> Backend FastAPI
-       |
-       +-- AudioCapture (micro USB, 44.1kHz -> 16kHz resampling)
-       |    +-- WakeWordDetector (EfficientWord-Net / openWakeWord)
-       |         +-- STT (OpenAI GPT-4o-transcribe)
-       |              +-- IntentRouter (mots-cles + fallback LLM)
-       |                   +-- MusicController (Spotify Connect)
-       |                   +-- WeatherService (Open-Meteo)
-       |                   +-- YouTubeController (yt-dlp + VLC)
-       |                   +-- CameraService (UniFi Protect)
-       |                   +-- LLMHandler -> TTS -> PipeWire -> AirPlay
-       |
-       +-- Panneau Admin (/admin)
-            +-- Entrainement mot de reveil, config, monitoring systeme
+Raspberry Pi 4 + Ecran tactile 7"
+  |
+  +-- Chromium Kiosk (app Svelte plein ecran)
+  |    +-- WebSocket <--> Backend FastAPI
+  |
+  +-- Micro USB (ReSpeaker 2-Mic Array)
+  |    +-- Detection mot de reveil (EfficientWord-Net / openWakeWord)
+  |    +-- Speech-to-Text (OpenAI GPT-4o-transcribe)
+  |    +-- Routeur d'intents (mots-cles, zero cout pour les commandes courantes)
+  |         |
+  |         +-- "mets du jazz"       --> API Spotify --> Devialet (Spotify Connect)
+  |         +-- "meteo demain"       --> Open-Meteo --> TTS --> AirPlay --> Enceinte
+  |         +-- "YouTube Stromae"    --> yt-dlp --> VLC --> AirPlay --> Enceinte
+  |         +-- "montre les cameras" --> UniFi Protect --> Snapshots en direct
+  |         +-- toute autre question --> LLM (GPT-4o-mini) --> TTS --> Enceinte
+  |
+  +-- Moteur audio PipeWire
+       +-- Sink RAOP (AirPlay) --> Devialet / Sonos / HomePod
+       +-- Spotify Connect (flux direct, le Pi n'est pas dans le chemin audio)
 ```
 
-### Flux du pipeline vocal
+### Architecture audio
 
-1. Le micro USB capture l'audio en continu (44.1kHz, reechantillonne a 16kHz)
-2. Le detecteur de mot de reveil ecoute votre hotword personnalise
-3. A la detection, la musique est baissee et 8 secondes d'audio sont capturees
-4. L'audio est envoye a OpenAI GPT-4o-transcribe pour la transcription en francais
-5. Le routeur d'intents fait du matching par mots-cles (zero cout) ou utilise le LLM en fallback
-6. Le handler correspondant execute l'action (jouer de la musique, lire la meteo, etc.)
-7. La reponse TTS est generee et jouee via PipeWire vers vos enceintes
-8. Le systeme retourne en veille, la detection du mot de reveil reprend apres un cooldown
+C'est ce qui rend Piboard special :
+
+| Source | Chemin | Qualite |
+|--------|--------|---------|
+| **Spotify** | Serveurs Spotify --> Spotify Connect --> votre enceinte | Sans perte (OGG 320kbps) |
+| **Video YouTube** | yt-dlp --> VLC --> PipeWire --> AirPlay (RAOP) --> votre enceinte | Jusqu'a 720p video + audio AAC |
+| **Reponses vocales** | OpenAI TTS --> PipeWire --> AirPlay --> votre enceinte | Voix naturelle |
+| **Ducking** | Volume Spotify baisse via API pendant le TTS, puis remonte | Transparent |
+
+Le Pi agit comme un **controleur et routeur**, jamais comme un DAC. Vos enceintes recoivent la meilleure qualite audio possible.
 
 ## Materiel requis
 
@@ -92,32 +98,23 @@ Chromium Kiosk (plein ecran, port 8000)
 |-----------|--------|-------|
 | **SBC** | Raspberry Pi 4 (4 Go RAM) | ARM64, Raspberry Pi OS Bookworm 64-bit |
 | **Ecran** | Raspberry Pi Touch Display 2 (7") | 720x1280, capacitif, connecteur DSI |
-| **Micro** | ReSpeaker Lite USB 2-Mic Array | Ou tout microphone USB |
-| **Enceintes** | Devialet / Sonos / toute enceinte AirPlay | Spotify Connect + AirPlay via PipeWire |
+| **Micro** | ReSpeaker Lite USB 2-Mic Array | AEC materiel, ou tout micro USB |
+| **Enceintes** | Toute enceinte AirPlay ou Spotify Connect | Devialet, Sonos, HomePod, etc. |
 | **Stockage** | microSD 32 Go+ (classe A2 recommandee) | |
 | **Reseau** | WiFi ou Ethernet | Pi et enceintes sur le meme LAN |
 
-> **Note :** Le Pi ne joue PAS l'audio directement. Les flux Spotify vont des serveurs Spotify directement a vos enceintes via Spotify Connect. Le TTS et l'audio YouTube transitent par PipeWire vers AirPlay.
+**Cout total :** ~120 EUR (Pi + ecran + micro), plus les enceintes que vous avez deja.
 
 ## Demarrage rapide
-
-### Prerequis
-
-- Raspberry Pi 4 avec Raspberry Pi OS Bookworm (64-bit)
-- Un microphone USB
-- Des enceintes compatibles Spotify Connect sur votre reseau
-- Des cles API (voir [Configuration](#configuration))
 
 ### 1. Cloner et installer
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/ekip-assistant.git
-cd ekip-assistant
+git clone https://github.com/elkir0/ekip-assistant.git piboard
+cd piboard
 chmod +x scripts/*.sh
 ./scripts/setup.sh
 ```
-
-Cela installe toutes les dependances systeme, cree un environnement virtuel Python, installe les paquets Python et compile le frontend.
 
 ### 2. Configurer
 
@@ -134,9 +131,9 @@ Remplissez vos cles API (voir [Configuration](#configuration) ci-dessous).
 ./scripts/start.sh
 ```
 
-Cela demarre le backend FastAPI sur le port 8000 et ouvre Chromium en mode kiosque.
+Le backend demarre sur le port 8000, Chromium s'ouvre en mode kiosque. C'est pret.
 
-### 4. (Optionnel) Demarrage automatique au boot
+### 4. Demarrage automatique au boot
 
 ```bash
 sudo cp systemd/piboard-backend.service /etc/systemd/system/
@@ -151,259 +148,156 @@ Creez un fichier `.env` depuis l'exemple :
 
 ```bash
 # Speech-to-Text + Text-to-Speech + LLM
-OPENAI_API_KEY=sk-...              # openai.com — utilise pour STT, TTS et LLM
+OPENAI_API_KEY=sk-...              # openai.com — STT, TTS et LLM
 
 # Spotify
 SPOTIFY_CLIENT_ID=...              # developer.spotify.com
 SPOTIFY_CLIENT_SECRET=...
-SPOTIFY_REDIRECT_URI=http://127.0.0.1:8888/callback
+SPOTIFY_REDIRECT_URI=http://localhost:8000/api/spotify/callback
 SPOTIFY_DEVICE_NAME=Devialet       # Nom exact de votre enceinte Spotify Connect
 
-# Meteo (Open-Meteo est gratuit, pas de cle necessaire)
+# Meteo (Open-Meteo est gratuit, pas de cle)
 WEATHER_CITY=Guadeloupe
 WEATHER_LAT=16.25
 WEATHER_LON=-61.58
 
-# UniFi Protect (optionnel — pour les cameras de securite)
+# UniFi Protect (optionnel — cameras de securite)
 UNIFI_HOST=192.168.1.18
 UNIFI_USER=admin
 UNIFI_PASS=...
 
 # Audio
 PIPEWIRE_AIRPLAY_SINK=Devialet     # Nom de votre sink AirPlay PipeWire
-RESPEAKER_DEVICE=hw:ReSpeaker,0    # Nom du device ALSA de votre micro USB
+RESPEAKER_DEVICE=hw:ReSpeaker,0    # Peripherique ALSA du micro USB
 
 # Serveur
 BACKEND_PORT=8000
-FRONTEND_PORT=3000
 ```
 
-### Obtenir les cles API
+### Cles API
 
 | Service | Ou l'obtenir | Cout |
 |---------|-------------|------|
-| **OpenAI** | [platform.openai.com](https://platform.openai.com) | A la consommation (minimal pour un assistant vocal) |
-| **Spotify** | [developer.spotify.com](https://developer.spotify.com) | Gratuit (necessite Spotify Premium pour la lecture) |
-| **UniFi Protect** | Cloud Key UniFi local | Gratuit (necessite du materiel UniFi) |
-
-> Open-Meteo est utilise pour la meteo et ne necessite aucune cle API.
-
-## Structure du projet
-
-```
-ekip-assistant/
-+-- backend/
-|   +-- main.py                  # App FastAPI, WebSocket, pipeline vocal
-|   +-- config.py                # Variables d'environnement et constantes
-|   +-- audio/
-|   |   +-- capture.py           # Flux audio micro USB (PyAudio)
-|   |   +-- wakeword.py          # Detection mot de reveil (EfficientWord-Net + openWakeWord)
-|   |   +-- output.py            # Sortie audio PipeWire
-|   |   +-- models/              # Modeles ONNX du mot de reveil
-|   |   +-- hotword_refs/        # Fichiers de reference du mot de reveil personnalise
-|   +-- services/
-|   |   +-- stt.py               # Speech-to-Text (OpenAI GPT-4o-transcribe)
-|   |   +-- tts.py               # Text-to-Speech (OpenAI TTS)
-|   |   +-- llm.py               # LLM pour les intents complexes (GPT-4o-mini)
-|   |   +-- spotify.py           # API Web Spotify (Spotipy)
-|   |   +-- weather.py           # Donnees meteo (Open-Meteo)
-|   |   +-- youtube.py           # Recherche YouTube + lecture VLC (yt-dlp)
-|   |   +-- cameras.py           # Snapshots cameras UniFi Protect
-|   +-- intent/
-|   |   +-- router.py            # Classification d'intents (mots-cles + fallback LLM)
-|   +-- admin/
-|       +-- routes.py            # Routes API du panneau admin
-|       +-- auth.py              # Authentification admin
-|       +-- config_manager.py    # Configuration en temps reel
-|       +-- static/              # Frontend compile du panneau admin
-+-- frontend/
-|   +-- src/
-|   |   +-- App.svelte           # App principale avec navigation swipe
-|   |   +-- pages/
-|   |   |   +-- Music.svelte     # Interface lecteur Spotify
-|   |   |   +-- Weather.svelte   # Affichage meteo
-|   |   |   +-- YouTube.svelte   # Recherche et lecteur YouTube
-|   |   |   +-- Cameras.svelte   # Grille cameras de securite
-|   |   +-- components/
-|   |   |   +-- WaveAnimation.svelte    # Animation d'ecoute vocale
-|   |   |   +-- VirtualKeyboard.svelte  # Clavier virtuel
-|   |   +-- stores/
-|   |       +-- assistant.js     # Store Svelte (etat global)
-|   +-- admin/                   # Panneau admin (app Svelte separee)
-|       +-- src/pages/           # Dashboard, Voice, Audio, Music, etc.
-+-- scripts/
-|   +-- setup.sh                 # Script d'installation complete
-|   +-- start.sh                 # Lancer backend + Chromium kiosque
-|   +-- deploy-pi.sh             # Deployer depuis la machine de dev vers le Pi via scp
-|   +-- record_wakeword.py       # Enregistrer des echantillons de mot de reveil
-|   +-- test_audio.sh            # Verifier le micro et PipeWire
-+-- systemd/
-|   +-- piboard-backend.service  # Service systemd pour le backend
-|   +-- piboard-kiosk.service    # Service systemd pour Chromium kiosque
-+-- requirements.txt             # Dependances Python
-+-- LICENSE                      # Licence MIT
-```
+| **OpenAI** | [platform.openai.com](https://platform.openai.com) | A la consommation (~0.01 EUR/jour pour un assistant vocal) |
+| **Spotify** | [developer.spotify.com](https://developer.spotify.com) | Gratuit (Spotify Premium requis pour la lecture) |
+| **Open-Meteo** | Pas de cle necessaire | Gratuit |
+| **UniFi Protect** | Cloud Key UniFi local | Gratuit (materiel UniFi requis) |
 
 ## Commandes vocales
 
-Ekip Assistant comprend les commandes vocales en francais. Voici quelques exemples :
+Piboard comprend les commandes vocales en francais :
 
 | Commande | Action |
 |----------|--------|
-| *"Hey Ekip, mets du jazz"* | Cherche et joue du jazz sur Spotify |
-| *"Hey Ekip, joue Stromae"* | Joue Stromae sur vos enceintes |
-| *"Hey Ekip, pause"* | Met en pause le morceau en cours |
-| *"Hey Ekip, suivant"* | Passe au morceau suivant |
-| *"Hey Ekip, plus fort"* | Augmente le volume |
-| *"Hey Ekip, moins fort"* | Baisse le volume |
-| *"Hey Ekip, meteo"* | Lit les previsions meteo a voix haute et bascule sur la page meteo |
-| *"Hey Ekip, YouTube Stromae"* | Cherche sur YouTube et lance le premier resultat via VLC |
-| *"Hey Ekip, stop video"* | Arrete la lecture YouTube |
-| *"Hey Ekip, dodo"* | Eteint l'ecran (mode veille) |
-| *"Hey Ekip, debout"* | Rallume l'ecran |
-| *"Hey Ekip, c'est quoi la capitale du Japon ?"* | Question generale traitee par le LLM |
+| *"Hey Piboard, mets du jazz"* | Cherche et lance du jazz sur Spotify via vos enceintes |
+| *"Hey Piboard, joue Stromae"* | Lance Stromae en Spotify Connect |
+| *"Hey Piboard, pause"* | Met en pause le morceau en cours |
+| *"Hey Piboard, suivant"* | Passe au morceau suivant |
+| *"Hey Piboard, plus fort"* | Monte le volume sur vos enceintes |
+| *"Hey Piboard, moins fort"* | Baisse le volume |
+| *"Hey Piboard, meteo"* | Lit la meteo a voix haute et affiche la page meteo |
+| *"Hey Piboard, mets la video Stromae"* | Cherche sur YouTube, lance en plein ecran avec son sur vos enceintes |
+| *"Hey Piboard, stop video"* | Arrete YouTube, reprend Spotify |
+| *"Hey Piboard, dodo"* | Eteint l'ecran (mode veille) |
+| *"Hey Piboard, debout"* | Rallume l'ecran |
+| *"Hey Piboard, c'est quoi la capitale du Japon ?"* | Question generale traitee par le LLM |
 
-> **Astuce :** Le mot de reveil est personnalisable. Vous pouvez entrainer le votre via le panneau d'administration ou le script `scripts/record_wakeword.py`.
+> Le mot de reveil est personnalisable. Entrainez le votre via le panneau admin ou `scripts/record_wakeword.py`.
 
 ## Controles tactiles
 
-- **Swipe haut/bas** pour naviguer entre les pages (Musique -> Meteo -> YouTube -> Cameras)
-- **Appuyez** sur play/pause, suivant/precedent sur la page Musique
+- **Swipe haut/bas** pour naviguer entre les pages (Musique > Meteo > YouTube > Cameras)
+- **Tap** play/pause, suivant/precedent sur la page Musique
 - **Curseur de volume** sur la page Musique
-- **Barre de recherche** sur la page YouTube avec clavier virtuel
-- **Appuyez** sur une camera pour voir son snapshot
+- **Clavier virtuel** pour la recherche YouTube
+- **Tap** sur une camera pour le snapshot en grand
 
 ## Panneau d'administration
 
-Accedez au panneau d'administration a l'adresse `http://ip-de-votre-pi:8000/admin` depuis n'importe quel appareil sur votre reseau.
+Accessible a `http://ip-du-pi:8000/admin` depuis n'importe quel appareil sur votre reseau.
 
-Fonctionnalites :
-- **Dashboard** — Etat du systeme, sante des services, uptime
-- **Voice** — Entrainement du mot de reveil (enregistrer des echantillons, tester la detection)
-- **Audio** — Niveaux du micro, selection du sink PipeWire
-- **Music** — Etat de la connexion Spotify, selection de l'appareil
-- **Weather** — Parametres de localisation
-- **YouTube** — Parametres de lecture
-- **Cameras** — Configuration UniFi Protect
-- **Screen** — Luminosite, planning de veille
-- **System** — Logs, redemarrage des services
-- **Interface** — Personnalisation de l'interface
+| Section | Ce que vous pouvez configurer |
+|---------|-------------------------------|
+| **Dashboard** | Etat systeme, sante des services, uptime, CPU/RAM |
+| **Voice** | Modele de mot de reveil, seuil de detection, cooldown |
+| **Audio** | Gain micro, selection du sink PipeWire |
+| **Music** | Connexion Spotify, selection d'appareil, limites de recherche |
+| **YouTube** | Format/qualite video, taille du tampon VLC (stabilite AirPlay), gestion des cookies d'authentification YouTube |
+| **Weather** | Localisation, fuseau horaire, jours de prevision |
+| **Cameras** | Hote UniFi Protect, resolution des snapshots, grille |
+| **Screen** | Luminosite, planning veille/reveil, volume nuit |
+| **System** | Logs en direct, redemarrage services, infos systeme |
+| **Interface** | Couleur d'accent, vitesse de transition, sensibilite du swipe |
 
-## Developpement
+## Stack technique
 
-### Developper sur Mac, deployer sur Pi
-
-Le workflow recommande est de developper sur votre Mac et deployer sur le Pi :
-
-```bash
-# Sur votre Mac — editer le code, puis deployer
-./scripts/deploy-pi.sh
-
-# Sur le Pi — redemarrer le service
-sudo systemctl restart piboard-backend
-```
-
-> **Note :** Node.js et npm ne sont PAS installes sur le Pi. Compilez toujours le frontend sur votre Mac avant de deployer.
-
-### Lancer en local (Mac)
-
-Le backend peut tourner sur macOS pour le developpement, mais la capture audio et la detection du mot de reveil necessitent du mocking car il n'y a ni ReSpeaker ni PipeWire :
-
-```bash
-# Creer le venv et installer les deps
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-
-# Compiler le frontend
-cd frontend && npm install && npm run build && cd ..
-
-# Lancer le backend (mode mock pour l'audio)
-cd backend && uvicorn main:app --host 0.0.0.0 --port 8000 --reload
-```
-
-### Stack technique
-
-| Couche | Technologie |
-|--------|------------|
-| Backend | Python 3.11, FastAPI, asyncio, WebSocket |
-| Frontend | Svelte 4, Vite 5 |
-| Capture audio | PyAudio, numpy, scipy (reechantillonnage) |
-| Mot de reveil | EfficientWord-Net (personnalise) + openWakeWord (fallback) |
-| Speech-to-Text | OpenAI GPT-4o-transcribe |
-| Text-to-Speech | OpenAI TTS |
-| LLM | OpenAI GPT-4o-mini (fallback intents + questions generales) |
-| Musique | Spotipy (API Web Spotify + Spotify Connect) |
-| Video | yt-dlp + VLC |
-| Meteo | Open-Meteo (gratuit, pas de cle API) |
-| Cameras | API REST UniFi Protect |
-| Routage audio | PipeWire + RAOP (AirPlay) |
-| Affichage | Chromium en mode kiosque (Wayland) |
+| Couche | Technologie | Pourquoi |
+|--------|------------|----------|
+| Backend | Python 3.11, FastAPI, asyncio | Tout async, WebSocket temps reel |
+| Frontend | Svelte 4, Vite 5 | Rapide, leger, parfait pour l'embarque |
+| Capture audio | PyAudio + resampling scipy | Micro USB 44.1kHz -> 16kHz pour le STT |
+| Mot de reveil | EfficientWord-Net + openWakeWord | Entrainement vocal + fallback fiable |
+| STT | OpenAI GPT-4o-transcribe | Meilleure precision en francais |
+| TTS | OpenAI TTS | Voix naturelle et expressive |
+| LLM | OpenAI GPT-4o-mini | Rapide, economique, assez intelligent pour les intents |
+| Musique | Spotipy + Spotify Connect | Streaming hi-fi direct vers les enceintes |
+| Video | yt-dlp + VLC + deno (solver JS) | Extraction YouTube fiable + lecture |
+| Meteo | Open-Meteo | Gratuit, sans cle, precis |
+| Cameras | API REST UniFi Protect | Reseau local, pas de dependance cloud |
+| Routage audio | PipeWire + RAOP (AirPlay) | Hi-fi sans fil vers toute enceinte AirPlay |
+| Affichage | Chromium kiosque (Wayland) | Plein ecran, optimise tactile |
 
 ## Depannage
 
-### Problemes courants
-
-**Micro non detecte :**
+**Pas de son sur les enceintes :**
 ```bash
-arecord -l                         # Lister les peripheriques de capture ALSA
-pactl list sources | grep -i name  # Lister les sources PipeWire
-```
-
-**Pas de sortie audio vers les enceintes :**
-```bash
-pactl list sinks | grep -i devialet  # Verifier si le sink AirPlay est visible
-wpctl status                          # Verifier l'etat PipeWire/WirePlumber
+pactl list sinks short          # Verifier que le sink AirPlay est visible
+wpctl status                    # Etat PipeWire/WirePlumber
 ```
 
 **Spotify ne se connecte pas :**
-- Verifiez que vous avez Spotify Premium
-- Verifiez que `SPOTIFY_DEVICE_NAME` dans `.env` correspond exactement au nom de votre enceinte dans l'app Spotify
-- Lancez le backend une premiere fois manuellement pour completer le flux OAuth
+- Spotify Premium requis
+- `SPOTIFY_DEVICE_NAME` doit correspondre exactement au nom dans l'app Spotify
+- Si deconnecte, la page Musique affiche un bouton "Reconnecter" pour la re-authentification OAuth
+- Enregistrez `http://localhost:8000/api/spotify/callback` dans votre Spotify Developer Dashboard
+
+**Les videos YouTube ne se lancent pas :**
+- YouTube bloque les requetes non authentifiees — installez les cookies via Admin > YouTube
+- Exportez les cookies depuis un navigateur connecte a YouTube (extension "Get cookies.txt LOCALLY")
+- `deno` est requis pour le solver JS de yt-dlp : `curl -fsSL https://deno.land/install.sh | sh`
+- Verifiez les logs : `journalctl -u piboard-backend -f`
 
 **Le mot de reveil ne se declenche pas :**
 - Verifiez les niveaux du micro dans le panneau admin
-- Essayez de baisser le seuil dans `backend/audio/wakeword.py`
-- Re-enregistrez des echantillons du mot de reveil via le panneau admin
+- Baissez le seuil ou re-enregistrez des echantillons
 
-**L'ecran ne s'allume/s'eteint pas :**
+**Controle de l'ecran :**
 ```bash
-# Verifier le controle du retro-eclairage
-cat /sys/class/backlight/10-0045/brightness
-echo 255 | sudo tee /sys/class/backlight/10-0045/brightness  # Allumer
-echo 0 | sudo tee /sys/class/backlight/10-0045/brightness    # Eteindre
+cat /sys/class/backlight/10-0045/brightness      # Lire la valeur actuelle
+echo 255 | sudo tee /sys/class/backlight/10-0045/brightness  # Max
+echo 0 | sudo tee /sys/class/backlight/10-0045/brightness    # Eteint
 ```
 
 ## Contribuer
 
-Les contributions sont les bienvenues ! C'est un projet passion, et il y a toujours de la place pour l'amelioration.
+Les contributions sont les bienvenues ! Fork, branche, PR.
 
-1. Forkez le depot
-2. Creez une branche feature (`git checkout -b feature/ma-fonctionnalite`)
-3. Commitez vos changements (`git commit -m 'Ajout de ma fonctionnalite'`)
-4. Poussez la branche (`git push origin feature/ma-fonctionnalite`)
-5. Ouvrez une Pull Request
-
-### Idees de contributions
-
-- Support multilingue des commandes vocales (anglais, espagnol, creole)
-- Integration domotique (Home Assistant, MQTT)
-- Page calendrier et rappels
-- Fonctionnalite reveil/alarme
+Idees :
+- Support multilingue (anglais, espagnol, creole)
+- Integration Home Assistant / MQTT
+- Reveil et minuteurs
 - Streaming radio/podcast
-- Reconnaissance de gestes par camera
 - Meilleurs modeles de mot de reveil
 
 ## Credits
 
 - Construit par **Anthony D.** en Guadeloupe
-- Propulse par [FastAPI](https://fastapi.tiangolo.com/), [Svelte](https://svelte.dev/), [Spotipy](https://spotipy.readthedocs.io/), [yt-dlp](https://github.com/yt-dlp/yt-dlp), [EfficientWord-Net](https://github.com/Ant-Brain/EfficientWord-Net), [openWakeWord](https://github.com/dscripka/openWakeWord)
-- Donnees meteo par [Open-Meteo](https://open-meteo.com/)
-- Services vocaux par [OpenAI](https://openai.com/)
+- Propulse par [FastAPI](https://fastapi.tiangolo.com/), [Svelte](https://svelte.dev/), [Spotipy](https://spotipy.readthedocs.io/), [yt-dlp](https://github.com/yt-dlp/yt-dlp), [openWakeWord](https://github.com/dscripka/openWakeWord)
+- Meteo par [Open-Meteo](https://open-meteo.com/) | Voix par [OpenAI](https://openai.com/)
 
 ## Licence
 
-Ce projet est sous **licence MIT** — voir le fichier [LICENSE](LICENSE) pour les details.
+Licence MIT — voir [LICENSE](LICENSE).
 
 ---
 
