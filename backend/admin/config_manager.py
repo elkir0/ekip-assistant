@@ -55,7 +55,7 @@ DEFAULT_CONFIG = {
         "search_limit": 5,
         "search_timeout_s": 15,
         "vlc_volume": 256,
-        "network_cache_ms": 5000,
+        "network_cache_ms": 8000,
         "stop_timeout_s": 3,
     },
     "weather": {

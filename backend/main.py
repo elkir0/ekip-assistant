@@ -452,6 +452,11 @@ async def lifespan(app: FastAPI):
         pause_fn=music.pause,
         resume_fn=music.resume,
     )
+    # Pause wake word during video to free CPU for smooth AirPlay audio
+    youtube.set_wakeword_callbacks(
+        pause_fn=lambda: setattr(wake_detector, 'paused', True),
+        resume_fn=lambda: setattr(wake_detector, 'paused', False),
+    )
     pipeline_task = asyncio.create_task(voice_pipeline())
     scheduler_task = asyncio.create_task(screen_scheduler())
     # Port 8888 redirect for Spotify OAuth callback (registered as http://127.0.0.1:8888/callback)

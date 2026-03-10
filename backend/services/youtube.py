@@ -21,7 +21,35 @@ def _get_yt_config() -> dict:
 
 
 def _get_raop_sink() -> str:
-    """Find the Devialet RAOP sink name from PipeWire."""
+    """Find the best Devialet RAOP sink from PipeWire.
+
+    Prefers the auto-discovered IPv4 sink over IPv6 or manual sinks,
+    falls back to default sink.
+    """
+    try:
+        result = subprocess.run(
+            ["pactl", "list", "sinks", "short"],
+            capture_output=True, text=True, timeout=5,
+        )
+        # Find Devialet RAOP sinks, prefer IPv4 over IPv6
+        ipv4_sink = None
+        any_devialet = None
+        for line in result.stdout.strip().split("\n"):
+            parts = line.split("\t")
+            if len(parts) >= 2 and "phantom" in parts[1].lower():
+                any_devialet = parts[1]
+                # Prefer IPv4 (contains dotted IP, not fe80::)
+                if "fe80" not in parts[1] and "devialet_ipv4" not in parts[1]:
+                    ipv4_sink = parts[1]
+
+        if ipv4_sink:
+            return ipv4_sink
+        if any_devialet:
+            return any_devialet
+    except Exception:
+        pass
+
+    # Fallback: use default sink
     try:
         result = subprocess.run(
             ["pactl", "get-default-sink"],
@@ -40,6 +68,8 @@ class YouTubeController:
         self._vlc_process: asyncio.subprocess.Process | None = None
         self._on_music_pause: Callable | None = None
         self._on_music_resume: Callable | None = None
+        self._on_wakeword_pause: Callable | None = None
+        self._on_wakeword_resume: Callable | None = None
         self._queue: list[dict] = []
         self._queue_index: int = 0
         self._on_finish_callback = None
@@ -50,6 +80,11 @@ class YouTubeController:
         """Set callbacks to pause/resume Spotify when YouTube plays/stops."""
         self._on_music_pause = pause_fn
         self._on_music_resume = resume_fn
+
+    def set_wakeword_callbacks(self, pause_fn, resume_fn):
+        """Set callbacks to pause/resume wake word during video playback (saves CPU)."""
+        self._on_wakeword_pause = pause_fn
+        self._on_wakeword_resume = resume_fn
 
     def set_queue(self, results: list[dict], on_next=None):
         """Set the video queue from search results."""
@@ -125,6 +160,13 @@ class YouTubeController:
         self._on_finish_callback = on_finish
 
         try:
+            # Pause wake word to free CPU for video playback
+            if self._on_wakeword_pause:
+                try:
+                    self._on_wakeword_pause()
+                except Exception:
+                    pass
+
             # Pause Spotify before playing YouTube (timeout to avoid rate limit block)
             if self._on_music_pause:
                 try:
@@ -240,6 +282,11 @@ class YouTubeController:
                 if duration < 5:
                     logger.warning("[YOUTUBE] VLC termine trop vite (%.1fs, code %s) — skip", duration, exit_code)
                     # Don't chain next, just clean up
+                    if self._on_wakeword_resume:
+                        try:
+                            self._on_wakeword_resume()
+                        except Exception:
+                            pass
                     if self._on_music_resume:
                         try:
                             await asyncio.wait_for(self._on_music_resume(), timeout=3)
@@ -275,8 +322,13 @@ class YouTubeController:
                     except Exception as e:
                         logger.error("[YOUTUBE] Erreur enchainement: %s", e)
 
-                # Queue exhausted or error — resume Spotify
+                # Queue exhausted or error — resume wake word + Spotify
                 logger.info("[YOUTUBE] Queue terminee")
+                if self._on_wakeword_resume:
+                    try:
+                        self._on_wakeword_resume()
+                    except Exception:
+                        pass
                 if self._on_music_resume:
                     try:
                         await asyncio.wait_for(self._on_music_resume(), timeout=3)
@@ -300,11 +352,17 @@ class YouTubeController:
             self._vlc_process = None
 
     async def stop(self) -> dict:
-        """Full stop: kill VLC, clear queue, resume Spotify."""
+        """Full stop: kill VLC, clear queue, resume wake word + Spotify."""
         self._stopped = True
         self._queue = []
         self._queue_index = 0
         await self._stop_vlc()
+        # Resume wake word (frees CPU constraint)
+        if self._on_wakeword_resume:
+            try:
+                self._on_wakeword_resume()
+            except Exception:
+                pass
         # Resume Spotify after stop (timeout to avoid rate limit block)
         if self._on_music_resume:
             try:
