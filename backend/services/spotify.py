@@ -38,11 +38,11 @@ class MusicController:
             return self._status_override
         if not HAS_SPOTIPY or not SPOTIFY_CLIENT_ID:
             return "no_credentials"
-        if not self._sp:
-            return "not_connected"
         cache_path = os.path.join(os.path.dirname(__file__), '..', '..', '.spotify_cache')
         if not os.path.exists(cache_path):
             return "auth_required"
+        if not self._sp:
+            return "not_connected"
         return "ok"
 
     async def _broadcast_status(self):
@@ -112,11 +112,13 @@ class MusicController:
     async def start(self):
         if not HAS_SPOTIPY or not SPOTIFY_CLIENT_ID:
             logger.info("[SPOTIFY] Mode mock (pas de credentials)")
+            await self._broadcast_status()
             return
 
         cache_path = os.path.join(os.path.dirname(__file__), '..', '..', '.spotify_cache')
         if not os.path.exists(cache_path):
             logger.warning("[SPOTIFY] Pas de cache OAuth — authentification requise")
+            await self._broadcast_status()
             return
 
         loop = asyncio.get_event_loop()

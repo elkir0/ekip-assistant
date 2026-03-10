@@ -398,6 +398,45 @@ async def _start_spotify():
         logger.error("[SPOTIFY] Erreur au demarrage: %s", e)
 
 
+async def _start_oauth_proxy():
+    """Tiny HTTP server on port 8888 that redirects to port 8000.
+
+    Spotify OAuth redirect URI is http://127.0.0.1:8888/callback but
+    FastAPI runs on port 8000. This proxy catches the callback and redirects.
+    """
+    async def handle_client(reader, writer):
+        try:
+            request_line = await asyncio.wait_for(reader.readline(), timeout=5)
+            # Read remaining headers (discard)
+            while True:
+                line = await asyncio.wait_for(reader.readline(), timeout=2)
+                if line == b'\r\n' or not line:
+                    break
+            # Extract path from "GET /callback?code=xxx HTTP/1.1"
+            parts = request_line.decode().split()
+            path = parts[1] if len(parts) >= 2 else "/"
+            redirect_url = f"http://127.0.0.1:8000{path}"
+            response = (
+                f"HTTP/1.1 302 Found\r\n"
+                f"Location: {redirect_url}\r\n"
+                f"Connection: close\r\n\r\n"
+            )
+            writer.write(response.encode())
+            await writer.drain()
+        except Exception:
+            pass
+        finally:
+            writer.close()
+
+    try:
+        server = await asyncio.start_server(handle_client, "127.0.0.1", 8888)
+        logger.info("[OAUTH] Proxy port 8888 -> 8000 actif")
+        return server
+    except OSError as e:
+        logger.warning("[OAUTH] Port 8888 indisponible: %s", e)
+        return None
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("[PI-BOARD] Demarrage des services...")
@@ -415,12 +454,17 @@ async def lifespan(app: FastAPI):
     )
     pipeline_task = asyncio.create_task(voice_pipeline())
     scheduler_task = asyncio.create_task(screen_scheduler())
+    # Port 8888 redirect for Spotify OAuth callback (registered as http://127.0.0.1:8888/callback)
+    proxy_server = await _start_oauth_proxy()
     logger.info("[PI-BOARD] Tous les services demarres")
     yield
     logger.info("[PI-BOARD] Arret...")
     await audio_capture.stop()
     pipeline_task.cancel()
     scheduler_task.cancel()
+    if proxy_server:
+        proxy_server.close()
+        await proxy_server.wait_closed()
 
 
 app = FastAPI(title="PI-Board", lifespan=lifespan)
@@ -443,8 +487,7 @@ async def websocket_endpoint(ws: WebSocket):
     # Send Spotify status on connect (with timeout — don't block WS on rate limits)
     try:
         spotify_status = music.status
-        if spotify_status != "ok":
-            await ws.send_json({"type": "spotify_status", "data": spotify_status})
+        await ws.send_json({"type": "spotify_status", "data": spotify_status})
         vol = await asyncio.wait_for(music.get_volume(), timeout=3)
         await ws.send_json({"type": "volume", "data": vol})
         current = await asyncio.wait_for(music.get_current(), timeout=3)
@@ -611,9 +654,14 @@ async def api_spotify_callback(code: str = ""):
         return JSONResponse({"error": "Code manquant"}, status_code=400)
     success = await music.handle_callback(code)
     if success:
-        # Redirect back to the main app — kiosk will show the music page
         return RedirectResponse("/")
     return JSONResponse({"error": "Echec authentification Spotify"}, status_code=500)
+
+
+@app.get("/callback")
+async def legacy_spotify_callback(code: str = ""):
+    """Legacy redirect URI (http://127.0.0.1:8888/callback) — forward to real handler."""
+    return await api_spotify_callback(code)
 
 
 @app.get("/api/youtube/login")

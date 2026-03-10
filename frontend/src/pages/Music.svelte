@@ -117,13 +117,18 @@
   }
 
   function reauthSpotify() {
-    // Navigate the kiosk directly to the backend reauth endpoint
+    // Open the reauth in a popup/new tab so kiosk stays alive
+    // On Pi kiosk this will navigate the main window — backend redirects back to / after auth
     window.location.href = '/api/spotify/reauth';
   }
+
+  // Spotify needs auth if no cache or no client
+  $: spotifyNeedsAuth = $spotifyStatus === 'auth_required' || $spotifyStatus === 'not_connected';
+  $: spotifyShowBanner = $spotifyStatus !== 'ok' && $spotifyStatus !== 'loading';
 </script>
 
 <div class="music-page">
-  {#if $spotifyStatus !== 'ok'}
+  {#if spotifyShowBanner}
     <div class="spotify-recovery">
       <div class="recovery-icon">
         <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
@@ -131,21 +136,21 @@
         </svg>
       </div>
       <div class="recovery-text">
-        {#if $spotifyStatus === 'auth_required'}
-          <span class="recovery-title">Spotify deconnecte</span>
-          <span class="recovery-detail">Token expire — reconnexion necessaire</span>
-        {:else if $spotifyStatus === 'no_credentials'}
+        {#if $spotifyStatus === 'no_credentials'}
           <span class="recovery-title">Spotify non configure</span>
           <span class="recovery-detail">Cles API manquantes dans .env</span>
+        {:else if spotifyNeedsAuth}
+          <span class="recovery-title">Spotify deconnecte</span>
+          <span class="recovery-detail">Appuyez pour connecter votre compte</span>
         {:else}
           <span class="recovery-title">Spotify indisponible</span>
           <span class="recovery-detail">Connexion perdue</span>
         {/if}
       </div>
       <div class="recovery-actions">
-        {#if $spotifyStatus === 'auth_required'}
+        {#if spotifyNeedsAuth}
           <button class="recovery-btn primary" on:click={reauthSpotify}>
-            Reconnecter
+            Connecter Spotify
           </button>
         {:else if $spotifyStatus !== 'no_credentials'}
           <button class="recovery-btn" on:click={retrySpotify} disabled={retrying}>

@@ -13,13 +13,15 @@ CAPTURE_RATE = 48000  # native mic rate, resampled to TARGET_RATE
 def resample(data: np.ndarray, src_rate: int, dst_rate: int) -> np.ndarray:
     if src_rate == dst_rate:
         return data
-    from math import gcd
-    from scipy.signal import resample_poly
-    g = gcd(src_rate, dst_rate)
-    up = dst_rate // g
-    down = src_rate // g
-    resampled = resample_poly(data.astype(np.float32), up, down)
-    return np.clip(resampled, -32768, 32767).astype(np.int16)
+    # Simple decimation: 48000 -> 16000 = factor 3
+    # Much lighter than scipy.signal.resample_poly on Pi 4
+    ratio = src_rate // dst_rate
+    if src_rate % dst_rate == 0 and ratio > 1:
+        return data[::ratio].copy()
+    # Fallback: linear interpolation
+    length = int(len(data) * dst_rate / src_rate)
+    indices = np.linspace(0, len(data) - 1, length)
+    return np.interp(indices, np.arange(len(data)), data.astype(np.float32)).astype(np.int16)
 
 
 class AudioCapture:
