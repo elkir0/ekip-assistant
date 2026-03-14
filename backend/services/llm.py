@@ -62,18 +62,30 @@ class LLMHandler:
             return raw_query
 
     async def identify_song(self, lyrics_hint: str) -> str | None:
-        """Identify a song from partial lyrics or description.
-
-        Strategy: web search first (accurate), LLM fallback (knowledge-based).
-        """
-        # 1. Try web search first (like Google — most accurate for lyrics)
-        web_result = await self._web_search_song(lyrics_hint)
-        if web_result:
-            return web_result
-
-        # 2. Fallback to LLM knowledge
+        """Identify a song using OpenAI Responses API with web search."""
         if not self._client:
             return None
+
+        # Use Responses API with web_search tool for real-time search
+        try:
+            response = await self._client.responses.create(
+                model="gpt-4o-mini",
+                tools=[{"type": "web_search_preview"}],
+                input=(
+                    f"Identifie cette chanson a partir des paroles ou de la description: {lyrics_hint}\n\n"
+                    "Cherche sur le web pour trouver l'artiste et le titre exact. "
+                    "Reponds UNIQUEMENT avec 'Artiste - Titre'. Rien d'autre."
+                ),
+            )
+            result = response.output_text.strip().strip('"\'')
+            if result.lower() in ("inconnu", ""):
+                return None
+            logger.info("[LLM] Song identified (web): '%s' -> '%s'", lyrics_hint[:40], result)
+            return result
+        except Exception as e:
+            logger.warning("[LLM] Responses API failed (%s), trying chat fallback", e)
+
+        # Fallback to chat completions
         try:
             response = await self._client.chat.completions.create(
                 model="gpt-4o",
@@ -82,7 +94,7 @@ class LLMHandler:
                 messages=[
                     {"role": "system", "content": (
                         "L'utilisateur decrit une chanson par ses paroles ou une description. "
-                        "Identifie la chanson. Reflechis bien, prends en compte le genre musical mentionne. "
+                        "Identifie la chanson. Prends en compte le genre musical mentionne. "
                         "Reponds UNIQUEMENT avec 'Artiste - Titre' ou 'inconnu'."
                     )},
                     {"role": "user", "content": lyrics_hint},
@@ -98,28 +110,28 @@ class LLMHandler:
             return None
 
     async def _web_search_song(self, query: str) -> str | None:
-        """Search the web for a song by lyrics, return 'Artist - Title' or None."""
-        import asyncio, subprocess
+        """Search for a song using DuckDuckGo + LLM extraction."""
+        import asyncio, urllib.parse
         try:
-            search_query = f'paroles "{query}" chanson artiste titre'
+            # DuckDuckGo HTML search (no API key, no blocking)
+            search_q = urllib.parse.quote(f'paroles "{query}" chanson artiste')
             proc = await asyncio.create_subprocess_exec(
                 "curl", "-s", "-L",
-                f"https://www.google.com/search?q={subprocess.list2cmdline([search_query]).replace(' ', '+')}&hl=fr",
-                "-H", "User-Agent: Mozilla/5.0",
+                f"https://html.duckduckgo.com/html/?q={search_q}",
+                "-H", "User-Agent: Mozilla/5.0 (X11; Linux aarch64)",
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.DEVNULL,
             )
-            stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=5)
+            stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=8)
             html = stdout.decode(errors="ignore")
 
-            # Ask LLM to extract the song from the search results
-            if not self._client or len(html) < 100:
+            if not self._client or len(html) < 200:
                 return None
 
-            # Take first 3000 chars of visible text
+            # Extract visible text from results
             import re
             text = re.sub(r'<[^>]+>', ' ', html)
-            text = re.sub(r'\s+', ' ', text)[:3000]
+            text = re.sub(r'\s+', ' ', text)[:4000]
 
             response = await self._client.chat.completions.create(
                 model="gpt-4o-mini",
@@ -127,11 +139,11 @@ class LLMHandler:
                 temperature=0,
                 messages=[
                     {"role": "system", "content": (
-                        "Voici le resultat d'une recherche Google pour identifier une chanson. "
-                        "Extrais le nom de l'artiste et le titre de la chanson. "
+                        "Voici les resultats d'une recherche web pour identifier une chanson a partir de ses paroles. "
+                        "Extrais le nom de l'artiste et le titre de la chanson trouvee. "
                         "Reponds UNIQUEMENT avec 'Artiste - Titre' ou 'inconnu'."
                     )},
-                    {"role": "user", "content": f"Recherche: {query}\n\nResultats Google:\n{text}"},
+                    {"role": "user", "content": f"Paroles recherchees: {query}\n\nResultats:\n{text}"},
                 ],
             )
             result = response.choices[0].message.content.strip().strip('"\'')
