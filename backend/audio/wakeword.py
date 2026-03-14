@@ -119,8 +119,15 @@ class WakeWordDetector:
             await self._process_oww(audio_queue)
 
     async def _process_ewn(self, audio_queue: asyncio.Queue):
-        """Process audio with EfficientWord-Net detector."""
+        """Process audio with EfficientWord-Net detector.
+
+        Key optimizations vs naive approach:
+        - scoreFrame runs in executor (doesn't block asyncio event loop)
+        - Full frame slide (1.5s) instead of half (0.75s) = 2x fewer inferences
+        - Small sleep after each inference to yield CPU to PipeWire/AirPlay
+        """
         buffer = np.array([], dtype=np.int16)
+        loop = asyncio.get_event_loop()
 
         while self.running:
             try:
@@ -140,18 +147,19 @@ class WakeWordDetector:
 
             buffer = np.concatenate([buffer, chunk])
 
-            # Process in 1-second frames (16000 samples) with 0.5s sliding window
+            # Process full frames (1.5s each, no overlap = half the CPU)
             while len(buffer) >= EWN_FRAME_SIZE:
                 frame = buffer[:EWN_FRAME_SIZE]
-                # Slide by half a frame (0.5s overlap)
-                buffer = buffer[EWN_FRAME_SIZE // 2:]
+                buffer = buffer[EWN_FRAME_SIZE:]
 
                 rms = int(np.sqrt(np.mean(frame.astype(np.float32)**2)))
 
                 try:
-                    result = self._detector.scoreFrame(frame, unsafe=True)
+                    # Run inference in thread pool — don't block event loop
+                    result = await loop.run_in_executor(
+                        None, lambda f=frame: self._detector.scoreFrame(f, unsafe=True)
+                    )
 
-                    # Debug log
                     self._debug_counter += 1
                     if result is not None:
                         confidence = result.get("confidence", 0)
@@ -169,9 +177,11 @@ class WakeWordDetector:
                             if self.on_wake:
                                 await self.on_wake()
                     else:
-                        # No voice activity detected
                         if self._debug_counter % 25 == 0:
                             logger.info("[WAKEWORD] %s (silence, rms=%d)", WAKEWORD_NAME, rms)
+
+                    # Yield CPU after inference — lets PipeWire/AirPlay breathe
+                    await asyncio.sleep(0.05)
 
                 except Exception as e:
                     if self._debug_counter % 100 == 0:
