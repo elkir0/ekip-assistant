@@ -164,6 +164,56 @@ async def handle_music_playlist(query: str):
         await speak("Dis-moi quelle playlist tu veux")
 
 
+async def handle_ai_mix(query: str):
+    """Generate a playlist with AI and play it on Spotify."""
+    await speak(f"Je prepare une selection pour toi...")
+    songs = await llm.generate_playlist(query)
+    if not songs:
+        await speak("Desole, je n'ai pas reussi a creer la playlist")
+        return
+
+    # Search each song on Spotify and collect URIs
+    uris = []
+    first_info = None
+    loop = asyncio.get_event_loop()
+    for song in songs:
+        try:
+            results = await loop.run_in_executor(
+                None, lambda s=song: music._sp.search(q=s, type="track", limit=1, market="FR")
+            )
+            tracks = results.get("tracks", {}).get("items", [])
+            if tracks:
+                uris.append(tracks[0]["uri"])
+                if not first_info:
+                    first_info = {
+                        "title": tracks[0]["name"],
+                        "artist": ", ".join(a["name"] for a in tracks[0]["artists"]),
+                    }
+        except Exception:
+            pass
+
+    if not uris:
+        await speak("Je n'ai trouve aucun morceau sur Spotify")
+        return
+
+    # Play all at once
+    try:
+        await music._find_device()
+        await loop.run_in_executor(
+            None, lambda: music._sp.start_playback(device_id=music._device_id, uris=uris)
+        )
+        current = await music.get_current()
+        await broadcast({"type": "music", "data": current})
+        await asyncio.sleep(1)
+        queue = await music.get_queue()
+        await broadcast({"type": "music_queue", "data": queue})
+        memory.add("MUSIC_AI_MIX", query, current)
+        await speak(f"C'est parti! {len(uris)} morceaux, en commencant par {first_info['title']} de {first_info['artist']}")
+    except Exception as e:
+        logger.error("[PIPELINE] AI mix play error: %s", e)
+        await speak("Erreur lors du lancement de la playlist")
+
+
 async def handle_time(_query: str):
     from datetime import datetime
     now = datetime.now()
@@ -338,6 +388,7 @@ INTENT_HANDLERS = {
     "MUSIC_VOLUME_SET": handle_music_volume_set,
     "MUSIC_WHAT": handle_music_what,
     "MUSIC_PLAYLIST": handle_music_playlist,
+    "MUSIC_AI_MIX": handle_ai_mix,
     "YOUTUBE_PLAY": handle_youtube_play,
     "YOUTUBE_STOP": handle_youtube_stop,
     "WEATHER": handle_weather,

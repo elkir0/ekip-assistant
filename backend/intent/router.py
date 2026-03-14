@@ -16,6 +16,7 @@ INTENT_KEYWORDS = {
     "MUSIC_VOLUME_SET": ["volume a", "volume à", "volume au", "son a", "son à", "mets le volume", "mets le son", "volume", "pourcent", "%"],
     "MUSIC_WHAT": ["c'est quoi", "c'est qui", "quel morceau", "quelle chanson", "qui chante", "quel artiste"],
     "MUSIC_PLAYLIST": ["playlist", "ma playlist", "mes playlists"],
+    "MUSIC_AI_MIX": ["fais moi", "cree moi", "crée moi", "genere", "génère", "ambiance", "mix de", "selection de", "sélection de", "compile", "propose moi"],
     # YouTube
     "YOUTUBE_PLAY": ["youtube", "video", "vidéo", "regarde", "montre", "clip", "dessin anime", "dessin animé", "épisode", "episode"],
     "YOUTUBE_STOP": ["ferme", "quitte", "stop video", "stop vidéo"],

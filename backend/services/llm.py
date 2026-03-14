@@ -61,6 +61,42 @@ class LLMHandler:
             logger.error("[LLM] Normalize error: %s", e)
             return raw_query
 
+    async def generate_playlist(self, prompt: str) -> list[str]:
+        """Ask the LLM to generate a playlist of song titles for a given mood/theme."""
+        if not self._client:
+            return []
+        try:
+            response = await self._client.chat.completions.create(
+                model="gpt-4o-mini",
+                max_tokens=500,
+                temperature=0.8,
+                messages=[
+                    {"role": "system", "content": (
+                        "Tu es un DJ expert. L'utilisateur te demande une playlist. "
+                        "Reponds UNIQUEMENT avec une liste JSON de 12 morceaux. "
+                        "Chaque element est une string 'Artiste - Titre'. "
+                        "Choisis des morceaux varies, connus, qui correspondent parfaitement a la demande. "
+                        "Pas de commentaires, pas d'explication, juste le JSON.\n"
+                        "Exemple de reponse:\n"
+                        '[\"Marvin Gaye - Let\'s Get It On\", \"Barry White - Can\'t Get Enough\"]'
+                    )},
+                    {"role": "user", "content": prompt},
+                ],
+            )
+            text = response.choices[0].message.content.strip()
+            # Parse JSON list
+            import json
+            # Handle markdown code blocks
+            if text.startswith("```"):
+                text = text.split("\n", 1)[1].rsplit("```", 1)[0].strip()
+            songs = json.loads(text)
+            if isinstance(songs, list):
+                logger.info("[LLM] Playlist: %d morceaux pour '%s'", len(songs), prompt[:40])
+                return songs[:15]
+        except Exception as e:
+            logger.error("[LLM] Playlist error: %s", e)
+        return []
+
     async def ask(self, user_message: str, context: str = "") -> str:
         if not self._client:
             return "Je suis en mode test, je ne peux pas repondre pour le moment."
