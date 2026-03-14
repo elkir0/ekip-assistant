@@ -23,27 +23,32 @@ def _get_yt_config() -> dict:
 def _get_raop_sink() -> str:
     """Find the best Devialet RAOP sink from PipeWire.
 
-    Prefers the auto-discovered IPv4 sink over IPv6 or manual sinks,
-    falls back to default sink.
+    Priority: 1) manual devialet_ipv4, 2) auto-discovered IPv4, 3) any Phantom, 4) default sink.
     """
     try:
         result = subprocess.run(
             ["pactl", "list", "sinks", "short"],
             capture_output=True, text=True, timeout=5,
         )
-        # Find Devialet RAOP sinks, prefer IPv4 over IPv6
-        ipv4_sink = None
+        manual_ipv4 = None
+        auto_ipv4 = None
         any_devialet = None
         for line in result.stdout.strip().split("\n"):
             parts = line.split("\t")
-            if len(parts) >= 2 and "phantom" in parts[1].lower():
-                any_devialet = parts[1]
-                # Prefer IPv4 (contains dotted IP, not fe80::)
-                if "fe80" not in parts[1] and "devialet_ipv4" not in parts[1]:
-                    ipv4_sink = parts[1]
+            if len(parts) < 2:
+                continue
+            name = parts[1]
+            if "devialet_ipv4" in name:
+                manual_ipv4 = name
+            elif "phantom" in name.lower() and "fe80" not in name:
+                auto_ipv4 = name
+            elif "phantom" in name.lower():
+                any_devialet = name
 
-        if ipv4_sink:
-            return ipv4_sink
+        if manual_ipv4:
+            return manual_ipv4
+        if auto_ipv4:
+            return auto_ipv4
         if any_devialet:
             return any_devialet
     except Exception:
