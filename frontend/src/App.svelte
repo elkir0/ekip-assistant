@@ -106,10 +106,10 @@
     class:dragging={swiping}
     style="transform: translateX(calc({-$currentPage * 100}vw + {dragOffset}px))"
   >
-    <div class="page"><Music /></div>
-    <div class="page"><Weather /></div>
-    <div class="page"><YouTube /></div>
-    <div class="page"><Cameras /></div>
+    <div class="page" class:page-hidden={$currentPage !== 0}><Music /></div>
+    <div class="page" class:page-hidden={$currentPage !== 1}><Weather /></div>
+    <div class="page" class:page-hidden={$currentPage !== 2}><YouTube /></div>
+    <div class="page" class:page-hidden={$currentPage !== 3}><Cameras /></div>
   </div>
 
   <nav class="indicators">
@@ -300,6 +300,11 @@
     align-items: center;
     justify-content: center;
     position: relative;
+  }
+
+  /* Pause ALL animations on non-visible pages to save CPU/GPU */
+  .page-hidden :global(*) {
+    animation-play-state: paused !important;
   }
 
   /* Bottom horizontal dots */
