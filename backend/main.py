@@ -306,25 +306,21 @@ async def speak(text: str):
     await set_state("SPEAKING")
     await broadcast({"type": "speaking", "data": text})
 
-    # Duck Spotify volume via API (not PipeWire — TTS uses PipeWire)
-    # Save current volume to restore after TTS (timeout to avoid rate limit block)
-    saved_spotify_vol = None
+    # Duck Devialet volume during TTS, restore after
+    saved_vol = None
     try:
-        current = await asyncio.wait_for(music.get_current(), timeout=2)
-        if current.get("playing"):
-            saved_spotify_vol = await asyncio.wait_for(music.get_spotify_volume(), timeout=2)
-    except (asyncio.TimeoutError, Exception):
+        dev_status = await asyncio.wait_for(devialet.get_status(), timeout=2)
+        saved_vol = dev_status.get("volume")
+    except Exception:
         pass
 
     async def duck(vol):
-        nonlocal saved_spotify_vol
         try:
-            if vol == 100:
-                restore_vol = saved_spotify_vol if saved_spotify_vol is not None else 70
-                await asyncio.wait_for(music.spotify_volume(restore_vol), timeout=2)
-            else:
-                await asyncio.wait_for(music.spotify_volume(vol), timeout=2)
-        except (asyncio.TimeoutError, Exception):
+            if vol == 100 and saved_vol:
+                await devialet.set_volume(saved_vol)
+            elif vol < 100 and saved_vol:
+                await devialet.set_volume(max(10, saved_vol // 3))
+        except Exception:
             pass
 
     await tts.speak(text, duck_callback=duck)
@@ -383,15 +379,16 @@ async def on_wake():
     if wake_detector:
         wake_detector.paused = True
 
-    # Duck music immediately so the mic hears the user clearly (timeout to avoid rate limit block)
+    # Duck music via Devialet volume so the mic hears the user clearly
     _wake_saved_vol = None
     try:
-        current = await asyncio.wait_for(music.get_current(), timeout=2)
-        if current.get("playing"):
-            _wake_saved_vol = await asyncio.wait_for(music.get_spotify_volume(), timeout=2)
-            duck_vol = max(10, (_wake_saved_vol or 50) // 2)
-            await asyncio.wait_for(music.spotify_volume(duck_vol), timeout=2)
-            logger.info("[PIPELINE] Musique duckee %d%% -> %d%%", _wake_saved_vol or 50, duck_vol)
+        dev_status = await asyncio.wait_for(devialet.get_status(), timeout=2)
+        current_vol = dev_status.get("volume")
+        if current_vol and current_vol > 20:
+            _wake_saved_vol = current_vol
+            duck_vol = max(10, current_vol // 3)
+            await devialet.set_volume(duck_vol)
+            logger.info("[PIPELINE] Devialet ducke %d%% -> %d%%", current_vol, duck_vol)
     except (asyncio.TimeoutError, Exception):
         pass
 
@@ -430,12 +427,12 @@ async def on_wake():
         except Exception as e:
             logger.error("[PIPELINE] Erreur handler %s: %s", intent, e)
 
-    # Restore music volume if we ducked it at wake
+    # Restore Devialet volume if we ducked it at wake
     if _wake_saved_vol is not None:
         try:
-            await asyncio.wait_for(music.spotify_volume(_wake_saved_vol), timeout=2)
-            logger.info("[PIPELINE] Volume restaure %d%%", _wake_saved_vol)
-        except (asyncio.TimeoutError, Exception):
+            await devialet.set_volume(_wake_saved_vol)
+            logger.info("[PIPELINE] Devialet volume restaure %d%%", _wake_saved_vol)
+        except Exception:
             pass
 
     # Return to IDLE
