@@ -876,9 +876,10 @@ async def api_youtube_login():
     return RedirectResponse("https://www.youtube.com")
 
 
-@app.get("/api/youtube/audio-proxy")
+@app.api_route("/api/youtube/audio-proxy", methods=["GET", "HEAD"])
 async def api_youtube_audio_proxy():
     """Proxy YouTube audio stream for UPnP playback (Devialet can't access HTTPS googlevideo)."""
+    from starlette.requests import Request
     proxy_url = getattr(youtube, '_current_audio_proxy_url', None)
     if not proxy_url:
         return JSONResponse({"error": "No audio stream"}, status_code=404)
@@ -887,11 +888,11 @@ async def api_youtube_audio_proxy():
 
     async def _stream():
         async with httpx.AsyncClient() as client:
-            async with client.stream("GET", proxy_url, timeout=60) as resp:
+            async with client.stream("GET", proxy_url, timeout=120) as resp:
                 async for chunk in resp.aiter_bytes(chunk_size=65536):
                     yield chunk
 
-    return StreamingResponse(_stream(), media_type="audio/webm")
+    return StreamingResponse(_stream(), media_type="audio/ogg")
 
 
 # Serve UPnP audio files (TTS, etc.)
