@@ -23,8 +23,21 @@ try:
 except ImportError:
     HAS_OWW = False
 
-COOLDOWN_S = 15.0
-EWN_THRESHOLD = 0.65
+# Admin config (runtime settings)
+try:
+    from admin.config_manager import config as admin_config
+except ImportError:
+    admin_config = None
+
+def _cfg(key, default):
+    """Read from admin config, fallback to default."""
+    if admin_config:
+        return admin_config.get("wakeword", key, default)
+    return default
+
+# Defaults (overridden by admin config at runtime)
+COOLDOWN_S_DEFAULT = 15.0
+THRESHOLD_DEFAULT = 0.5
 
 # EfficientWord-Net paths
 REFS_DIR = os.path.join(os.path.dirname(__file__), "hotword_refs")
@@ -33,7 +46,6 @@ WAKEWORD_REF = os.path.join(REFS_DIR, f"{WAKEWORD_NAME}_ref.json")
 
 # openWakeWord fallback
 OWW_CHUNK_SIZE = 1280
-OWW_THRESHOLD = 0.3
 MODELS_DIR = os.path.join(os.path.dirname(__file__), "models")
 CUSTOM_MODEL = os.path.join(MODELS_DIR, "Terminator!.onnx")
 
@@ -56,19 +68,25 @@ class WakeWordDetector:
         self._buffer = np.array([], dtype=np.int16)
 
     async def start(self):
-        if HAS_EWN and os.path.exists(WAKEWORD_REF):
+        # Read config from admin panel (live values)
+        self._threshold = float(_cfg("threshold", THRESHOLD_DEFAULT))
+        self._cooldown = float(_cfg("cooldown_s", COOLDOWN_S_DEFAULT))
+        engine_pref = _cfg("engine", "ewn")
+
+        if engine_pref == "ewn" and HAS_EWN and os.path.exists(WAKEWORD_REF):
             try:
                 base_model = Resnet50_Arc_loss()
                 self._detector = HotwordDetector(
                     hotword=WAKEWORD_NAME,
                     model=base_model,
                     reference_file=WAKEWORD_REF,
-                    threshold=EWN_THRESHOLD,
+                    threshold=self._threshold,
                     relaxation_time=2,
                     continuous=True,
                 )
                 self._use_ewn = True
-                logger.info("[WAKEWORD] EfficientWord-Net charge (%s, threshold=%.1f)", WAKEWORD_NAME, EWN_THRESHOLD)
+                logger.info("[WAKEWORD] EfficientWord-Net charge (%s, threshold=%.2f, cooldown=%.0fs)",
+                           WAKEWORD_NAME, self._threshold, self._cooldown)
             except Exception as e:
                 logger.error("[WAKEWORD] Erreur init EfficientWord-Net: %s", e)
                 self._use_ewn = False
@@ -80,13 +98,15 @@ class WakeWordDetector:
                         wakeword_models=[CUSTOM_MODEL],
                         inference_framework="onnx",
                     )
-                    logger.info("[WAKEWORD] Fallback openWakeWord (Terminator!, threshold=%.1f)", OWW_THRESHOLD)
+                    logger.info("[WAKEWORD] openWakeWord (Terminator!, threshold=%.2f, cooldown=%.0fs)",
+                               self._threshold, self._cooldown)
                 else:
                     self._oww_model = OWWModel(
                         wakeword_models=["hey_jarvis"],
                         inference_framework="onnx",
                     )
-                    logger.info("[WAKEWORD] Fallback openWakeWord (hey_jarvis, threshold=%.1f)", OWW_THRESHOLD)
+                    logger.info("[WAKEWORD] openWakeWord (hey_jarvis, threshold=%.2f, cooldown=%.0fs)",
+                               self._threshold, self._cooldown)
             else:
                 logger.info("[WAKEWORD] Mode mock actif")
 
@@ -142,7 +162,7 @@ class WakeWordDetector:
 
                         if matched:
                             now = time.monotonic()
-                            if now - self._last_trigger < COOLDOWN_S:
+                            if now - self._last_trigger < self._cooldown:
                                 continue
                             self._last_trigger = now
                             logger.info("[WAKEWORD] Detecte! (EWN conf=%.2f)", confidence)
@@ -196,7 +216,7 @@ class WakeWordDetector:
                         logger.info("[WAKEWORD] %s score=%.3f (rms=%d)", model_name, score,
                                    np.sqrt(np.mean(frame.astype(np.float32)**2)))
 
-                    if score >= OWW_THRESHOLD:
+                    if score >= self._threshold:
                         now = time.monotonic()
                         if now - self._last_trigger < COOLDOWN_S:
                             continue
