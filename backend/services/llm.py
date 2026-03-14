@@ -62,7 +62,16 @@ class LLMHandler:
             return raw_query
 
     async def identify_song(self, lyrics_hint: str) -> str | None:
-        """Identify a song from partial lyrics or description."""
+        """Identify a song from partial lyrics or description.
+
+        Strategy: web search first (accurate), LLM fallback (knowledge-based).
+        """
+        # 1. Try web search first (like Google — most accurate for lyrics)
+        web_result = await self._web_search_song(lyrics_hint)
+        if web_result:
+            return web_result
+
+        # 2. Fallback to LLM knowledge
         if not self._client:
             return None
         try:
@@ -74,11 +83,7 @@ class LLMHandler:
                     {"role": "system", "content": (
                         "L'utilisateur decrit une chanson par ses paroles ou une description. "
                         "Identifie la chanson. Reflechis bien, prends en compte le genre musical mentionne. "
-                        "Si l'utilisateur dit que c'est de l'electronique, du rap, etc., cherche dans ce genre. "
-                        "Reponds avec: Artiste - Titre\n"
-                        "Si tu hesites entre plusieurs, donne la plus probable.\n"
-                        "Si tu ne sais vraiment pas, reponds 'inconnu'.\n"
-                        "Rien d'autre que 'Artiste - Titre' ou 'inconnu'."
+                        "Reponds UNIQUEMENT avec 'Artiste - Titre' ou 'inconnu'."
                     )},
                     {"role": "user", "content": lyrics_hint},
                 ],
@@ -86,11 +91,56 @@ class LLMHandler:
             result = response.choices[0].message.content.strip().strip('"\'')
             if result.lower() == "inconnu":
                 return None
-            logger.info("[LLM] Song identified: '%s' -> '%s'", lyrics_hint[:40], result)
+            logger.info("[LLM] Song identified (LLM): '%s' -> '%s'", lyrics_hint[:40], result)
             return result
         except Exception as e:
             logger.error("[LLM] Identify song error: %s", e)
             return None
+
+    async def _web_search_song(self, query: str) -> str | None:
+        """Search the web for a song by lyrics, return 'Artist - Title' or None."""
+        import asyncio, subprocess
+        try:
+            search_query = f'paroles "{query}" chanson artiste titre'
+            proc = await asyncio.create_subprocess_exec(
+                "curl", "-s", "-L",
+                f"https://www.google.com/search?q={subprocess.list2cmdline([search_query]).replace(' ', '+')}&hl=fr",
+                "-H", "User-Agent: Mozilla/5.0",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.DEVNULL,
+            )
+            stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=5)
+            html = stdout.decode(errors="ignore")
+
+            # Ask LLM to extract the song from the search results
+            if not self._client or len(html) < 100:
+                return None
+
+            # Take first 3000 chars of visible text
+            import re
+            text = re.sub(r'<[^>]+>', ' ', html)
+            text = re.sub(r'\s+', ' ', text)[:3000]
+
+            response = await self._client.chat.completions.create(
+                model="gpt-4o-mini",
+                max_tokens=50,
+                temperature=0,
+                messages=[
+                    {"role": "system", "content": (
+                        "Voici le resultat d'une recherche Google pour identifier une chanson. "
+                        "Extrais le nom de l'artiste et le titre de la chanson. "
+                        "Reponds UNIQUEMENT avec 'Artiste - Titre' ou 'inconnu'."
+                    )},
+                    {"role": "user", "content": f"Recherche: {query}\n\nResultats Google:\n{text}"},
+                ],
+            )
+            result = response.choices[0].message.content.strip().strip('"\'')
+            if result.lower() != "inconnu" and "-" in result:
+                logger.info("[LLM] Song identified (web): '%s' -> '%s'", query[:40], result)
+                return result
+        except Exception as e:
+            logger.warning("[LLM] Web search failed: %s", e)
+        return None
 
     async def generate_playlist(self, prompt: str) -> list[str]:
         """Ask the LLM to generate a playlist of song titles for a given mood/theme."""
