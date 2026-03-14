@@ -60,18 +60,27 @@ def _discover_url() -> str:
 
 
 def _get_device():
-    """Get cached UPnP device or discover it."""
+    """Get UPnP device, re-discover if connection fails."""
     global _device, _device_url
-    if _device is not None:
-        return _device
     if not HAS_UPNP:
         return None
+
+    # Try cached device first
+    if _device is not None:
+        try:
+            _device.AVTransport  # Quick check if still valid
+            return _device
+        except Exception:
+            logger.info("[UPNP] Device cache invalide, re-decouverte...")
+            _device = None
+            _device_url = None
+
+    # Discover fresh
     try:
-        if not _device_url:
-            _device_url = _discover_url()
+        _device_url = _discover_url()
         if _device_url:
             _device = upnpclient.Device(_device_url)
-            logger.info("[UPNP] Devialet connecte: %s", _device.friendly_name)
+            logger.info("[UPNP] Devialet connecte: %s (%s)", _device.friendly_name, _device_url)
     except Exception as e:
         logger.warning("[UPNP] Erreur connexion: %s", e)
         _device = None
