@@ -223,17 +223,47 @@ class YouTubeController:
             logger.error("[YOUTUBE] yt-dlp n'a retourne aucune URL pour %s", url)
             return {"playing": False, "error": "Impossible d'obtenir l'URL"}
 
-        sink_name = _get_raop_sink()
-        logger.info("[YOUTUBE] Sink audio: %s, %d stream URLs", sink_name, len(stream_urls))
-        env = {**os.environ, "PULSE_SINK": sink_name}
         cache_ms = cfg.get("network_cache_ms", 5000)
 
-        # mpv: video + audio via PipeWire → AirPlay
+        # Download audio to local file for UPnP (Devialet can't access HTTPS)
+        upnp_audio = False
+        if len(stream_urls) >= 2:
+            try:
+                from audio import upnp_player
+                import uuid
+                audio_dir = Path(__file__).parent / ".." / ".." / "frontend" / "dist" / "upnp_audio"
+                audio_dir.mkdir(exist_ok=True)
+                audio_file = audio_dir / f"yt_{uuid.uuid4().hex[:8]}.webm"
+
+                # Download audio stream to local file (fast, just the audio track)
+                dl_proc = await asyncio.create_subprocess_exec(
+                    "curl", "-sL", "-o", str(audio_file), stream_urls[1],
+                    stdout=asyncio.subprocess.DEVNULL,
+                    stderr=asyncio.subprocess.DEVNULL,
+                )
+                await asyncio.wait_for(dl_proc.wait(), timeout=15)
+
+                if audio_file.exists() and audio_file.stat().st_size > 1000:
+                    pi_ip = upnp_player._get_pi_ip()
+                    local_url = f"http://{pi_ip}:8000/upnp_audio/{audio_file.name}"
+                    upnp_audio = await upnp_player.play_url(local_url, title="YouTube", mime="audio/webm")
+                    if upnp_audio:
+                        logger.info("[YOUTUBE] Audio via UPnP (%s)", audio_file.name)
+                        # Clean up after video ends
+                        self._upnp_audio_file = audio_file
+                    else:
+                        audio_file.unlink(missing_ok=True)
+                else:
+                    logger.warning("[YOUTUBE] Audio download trop petit ou echoue")
+                    audio_file.unlink(missing_ok=True)
+            except Exception as e:
+                logger.warning("[YOUTUBE] UPnP audio echoue: %s", e)
+
+        # mpv: video only (audio via UPnP) or video+audio fallback
         cache_secs = max(10, cache_ms // 1000)
         player_args = [
             "mpv",
             "--fullscreen",
-            "--ao=pulse",
             "--vo=gpu",
             "--gpu-context=wayland",
             "--no-terminal",
@@ -241,11 +271,20 @@ class YouTubeController:
             f"--demuxer-readahead-secs={cache_secs}",
             "--demuxer-max-bytes=80M",
             "--hwdec=no",
-            "--audio-buffer=1",
         ]
-        if len(stream_urls) >= 2 and stream_urls[1]:
-            player_args.append(f"--audio-file={stream_urls[1]}")
+        if upnp_audio:
+            player_args.append("--no-audio")
+        else:
+            sink_name = _get_raop_sink()
+            env = {**os.environ, "PULSE_SINK": sink_name}
+            player_args.extend(["--ao=pulse", "--audio-buffer=1"])
+            if len(stream_urls) >= 2 and stream_urls[1]:
+                player_args.append(f"--audio-file={stream_urls[1]}")
         player_args.append(stream_urls[0])
+
+        env = {**os.environ}
+        if not upnp_audio:
+            env["PULSE_SINK"] = _get_raop_sink()
 
         logger.info("[YOUTUBE] Lancement mpv: %d args, video=%s", len(player_args), url)
         self._vlc_process = await asyncio.create_subprocess_exec(
@@ -348,7 +387,7 @@ class YouTubeController:
             logger.error("[YOUTUBE] Erreur watcher mpv: %s", e)
 
     async def _stop_vlc(self):
-        """Stop VLC without resuming Spotify or clearing queue."""
+        """Stop player without resuming Spotify or clearing queue."""
         if self._vlc_process and self._vlc_process.returncode is None:
             try:
                 self._vlc_process.send_signal(signal.SIGTERM)
@@ -357,6 +396,15 @@ class YouTubeController:
             except (asyncio.TimeoutError, ProcessLookupError):
                 self._vlc_process.kill()
             self._vlc_process = None
+        # Stop UPnP audio and clean up file
+        try:
+            from audio import upnp_player
+            await upnp_player.stop()
+        except Exception:
+            pass
+        if hasattr(self, '_upnp_audio_file') and self._upnp_audio_file:
+            self._upnp_audio_file.unlink(missing_ok=True)
+            self._upnp_audio_file = None
 
     async def stop(self) -> dict:
         """Full stop: kill VLC, clear queue, resume wake word + Spotify."""
