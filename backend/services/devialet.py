@@ -121,12 +121,22 @@ class DevialetService:
     # ------------------------------------------------------------------
 
     async def set_volume(self, percent: int) -> bool:
-        """Set volume (0-100)."""
+        """Set volume (0-100). Also syncs PipeWire to prevent AirPlay reset."""
         percent = max(0, min(100, percent))
-        return await self._post(
+        ok = await self._post(
             "/systems/current/sources/current/soundControl/volume",
             {"volume": percent},
         )
+        # Sync PipeWire sink volume to match — AirPlay ties them together
+        try:
+            import subprocess
+            subprocess.run(
+                ["pactl", "set-sink-volume", "@DEFAULT_SINK@", f"{percent}%"],
+                timeout=2, capture_output=True,
+            )
+        except Exception:
+            pass
+        return ok
 
     async def volume_up(self) -> bool:
         return await self._post(
