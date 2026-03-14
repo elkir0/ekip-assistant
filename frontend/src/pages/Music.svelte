@@ -34,7 +34,7 @@
   });
   onDestroy(() => clearInterval(progressInterval));
 
-  const eqBars = 16;
+  const eqBars = 8;
   let showSearch = false;
   let showPlaylists = false;
   let searchQuery = '';
@@ -438,7 +438,7 @@
     justify-content: center;
     position: relative;
   }
-  .vinyl.spinning { animation: vinylSpin 8s linear infinite; }
+  .vinyl.spinning { animation: vinylSpin 20s linear infinite; }
   .vinyl.breathing { animation: vinylBreathe 4s ease-in-out infinite; }
 
   .vinyl-groove {
@@ -487,13 +487,7 @@
     transition: opacity 800ms ease;
   }
   .cover-glow.playing {
-    opacity: 1;
-    animation: glowPulse 3s ease-in-out infinite;
-  }
-
-  @keyframes glowPulse {
-    0%, 100% { opacity: 0.8; transform: scale(1); }
-    50% { opacity: 1; transform: scale(1.04); }
+    opacity: 0.9;
   }
 
   /* ──── Info zone ──── */

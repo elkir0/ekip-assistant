@@ -302,9 +302,13 @@
     position: relative;
   }
 
-  /* Pause ALL animations on non-visible pages to save CPU/GPU */
+  /* Pause ALL animations and demote GPU layers on non-visible pages */
   .page-hidden :global(*) {
     animation-play-state: paused !important;
+    will-change: auto !important;
+  }
+  .page-hidden {
+    visibility: hidden;
   }
 
   /* Bottom horizontal dots */
