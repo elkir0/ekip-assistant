@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import os
+import json
 from typing import Any
 
 from config import (
@@ -20,6 +21,8 @@ except ImportError:
     HAS_SPOTIPY = False
     logger.warning("[SPOTIFY] spotipy non disponible")
 
+SPOTIFY_SCOPE = "user-modify-playback-state user-read-playback-state user-read-currently-playing playlist-read-private playlist-read-collaborative"
+
 
 class MusicController:
     def __init__(self):
@@ -38,8 +41,7 @@ class MusicController:
             return self._status_override
         if not HAS_SPOTIPY or not SPOTIFY_CLIENT_ID:
             return "no_credentials"
-        cache_path = os.path.join(os.path.dirname(__file__), '..', '..', '.spotify_cache')
-        if not os.path.exists(cache_path):
+        if not os.path.exists(self._cache_path()):
             return "auth_required"
         if not self._sp:
             return "not_connected"
@@ -53,19 +55,60 @@ class MusicController:
             except Exception:
                 pass
 
+    def _cache_path(self) -> str:
+        return os.path.join(os.path.dirname(__file__), '..', '..', '.spotify_cache')
+
     async def _handle_api_error(self, e: Exception):
-        """Detect auth failures and broadcast status change."""
+        """Detect auth failures — try refresh before nuking cache."""
         err_str = str(e).lower()
-        if any(k in err_str for k in ["invalid_grant", "token revoked", "expired", "401", "access token"]):
-            logger.warning("[SPOTIFY] Auth invalide detectee — passage en auth_required")
-            self._status_override = "auth_required"
-            self._sp = None
-            # Delete stale cache
-            cache_path = os.path.join(os.path.dirname(__file__), '..', '..', '.spotify_cache')
-            if os.path.exists(cache_path):
-                os.remove(cache_path)
-                logger.info("[SPOTIFY] Cache OAuth supprime")
-            await self._broadcast_status()
+        if not any(k in err_str for k in ["invalid_grant", "token revoked", "expired", "401", "access token"]):
+            return
+
+        logger.warning("[SPOTIFY] Erreur auth detectee, tentative de refresh...")
+        loop = asyncio.get_event_loop()
+
+        # Try to refresh token first (don't delete cache yet!)
+        try:
+            new_client = await loop.run_in_executor(None, self._try_refresh_token)
+            if new_client:
+                self._sp = new_client
+                self._status_override = None
+                logger.info("[SPOTIFY] Token refresh reussi")
+                await self._broadcast_status()
+                return
+        except Exception as refresh_err:
+            logger.warning("[SPOTIFY] Refresh echoue: %s", refresh_err)
+
+        # Refresh truly failed — token is dead
+        logger.warning("[SPOTIFY] Token irrecuperable — passage en auth_required")
+        self._sp = None
+        self._status_override = "auth_required"
+        cache = self._cache_path()
+        if os.path.exists(cache):
+            os.remove(cache)
+            logger.info("[SPOTIFY] Cache OAuth supprime")
+        await self._broadcast_status()
+
+    def _try_refresh_token(self):
+        """Attempt to refresh the access token using the cached refresh_token."""
+        cache = self._cache_path()
+        if not os.path.exists(cache):
+            return None
+        # Read refresh_token from cache
+        with open(cache, 'r') as f:
+            token_info = json.load(f)
+        refresh_token = token_info.get("refresh_token")
+        if not refresh_token:
+            return None
+        auth = SpotifyOAuth(
+            client_id=SPOTIFY_CLIENT_ID,
+            client_secret=SPOTIFY_CLIENT_SECRET,
+            redirect_uri=SPOTIFY_REDIRECT_URI,
+            scope=SPOTIFY_SCOPE,
+            cache_path=cache,
+        )
+        auth.refresh_access_token(refresh_token)
+        return spotipy.Spotify(auth_manager=auth)
 
     def get_auth_url(self) -> str | None:
         """Generate Spotify OAuth URL for re-authentication."""
@@ -75,10 +118,47 @@ class MusicController:
             client_id=SPOTIFY_CLIENT_ID,
             client_secret=SPOTIFY_CLIENT_SECRET,
             redirect_uri=SPOTIFY_REDIRECT_URI,
-            scope="user-modify-playback-state user-read-playback-state user-read-currently-playing playlist-read-private playlist-read-collaborative",
-            cache_path=os.path.join(os.path.dirname(__file__), '..', '..', '.spotify_cache'),
+            scope=SPOTIFY_SCOPE,
+            cache_path=self._cache_path(),
         )
         return auth.get_authorize_url()
+
+    def get_auth_qr(self) -> str | None:
+        """Generate QR code as data:image/png;base64 for the Spotify auth URL."""
+        url = self.get_auth_url()
+        if not url:
+            return None
+        try:
+            import qrcode
+            import io
+            import base64
+            qr = qrcode.QRCode(version=1, box_size=8, border=2)
+            qr.add_data(url)
+            qr.make(fit=True)
+            img = qr.make_image(fill_color="white", back_color="#0a0a0f")
+            buf = io.BytesIO()
+            img.save(buf, format="PNG")
+            b64 = base64.b64encode(buf.getvalue()).decode()
+            return f"data:image/png;base64,{b64}"
+        except ImportError:
+            logger.warning("[SPOTIFY] qrcode non installe — pip install 'qrcode[pil]'")
+            return None
+
+    async def token_watchdog(self):
+        """Proactively refresh token every 45 min to prevent expiry."""
+        while True:
+            await asyncio.sleep(45 * 60)
+            if not self._sp:
+                continue
+            loop = asyncio.get_event_loop()
+            try:
+                await asyncio.wait_for(
+                    loop.run_in_executor(None, self._sp.current_user), timeout=10
+                )
+                logger.info("[SPOTIFY] Token watchdog: OK")
+            except Exception as e:
+                logger.warning("[SPOTIFY] Token watchdog: %s", e)
+                await self._handle_api_error(e)
 
     async def handle_callback(self, code: str) -> bool:
         """Handle OAuth callback code, create client, broadcast ok status."""
@@ -91,8 +171,8 @@ class MusicController:
                     client_id=SPOTIFY_CLIENT_ID,
                     client_secret=SPOTIFY_CLIENT_SECRET,
                     redirect_uri=SPOTIFY_REDIRECT_URI,
-                    scope="user-modify-playback-state user-read-playback-state user-read-currently-playing playlist-read-private playlist-read-collaborative",
-                    cache_path=os.path.join(os.path.dirname(__file__), '..', '..', '.spotify_cache'),
+                    scope=SPOTIFY_SCOPE,
+                    cache_path=self._cache_path(),
                 )
                 auth.get_access_token(code)
                 return spotipy.Spotify(auth_manager=auth)
@@ -115,8 +195,7 @@ class MusicController:
             await self._broadcast_status()
             return
 
-        cache_path = os.path.join(os.path.dirname(__file__), '..', '..', '.spotify_cache')
-        if not os.path.exists(cache_path):
+        if not os.path.exists(self._cache_path()):
             logger.warning("[SPOTIFY] Pas de cache OAuth — authentification requise")
             await self._broadcast_status()
             return
@@ -163,8 +242,8 @@ class MusicController:
             client_id=SPOTIFY_CLIENT_ID,
             client_secret=SPOTIFY_CLIENT_SECRET,
             redirect_uri=SPOTIFY_REDIRECT_URI,
-            scope="user-modify-playback-state user-read-playback-state user-read-currently-playing playlist-read-private playlist-read-collaborative",
-            cache_path=os.path.join(os.path.dirname(__file__), '..', '..', '.spotify_cache'),
+            scope=SPOTIFY_SCOPE,
+            cache_path=self._cache_path(),
         )
         return spotipy.Spotify(auth_manager=auth)
 

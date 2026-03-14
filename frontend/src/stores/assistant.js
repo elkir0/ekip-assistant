@@ -15,9 +15,12 @@ export const musicSearchResults = writable([]);
 export const musicPlaylists = writable([]);
 export const spotifyStatus = writable('loading');
 export const spotifyReauthUrl = writable(null);
+export const spotifyAuthQr = writable(null);
 export const youtubeError = writable('');
 export const camerasData = writable([]);
 export const fullscreenCam = writable(null);
+export const showSettings = writable(false);
+export const audioSinks = writable({ default: '', sinks: [] });
 
 let ws = null;
 
@@ -81,10 +84,28 @@ export function connectWS() {
         break;
       case 'spotify_status':
         spotifyStatus.set(msg.data);
-        if (msg.data === 'ok') spotifyReauthUrl.set(null);
+        if (msg.data === 'ok') {
+          spotifyReauthUrl.set(null);
+          spotifyAuthQr.set(null);
+        }
         break;
       case 'spotify_reauth_url':
         spotifyReauthUrl.set(msg.data);
+        break;
+      case 'spotify_auth_qr':
+        spotifyAuthQr.set(msg.data);
+        break;
+      case 'audio_sinks':
+        audioSinks.set(msg.data);
+        break;
+      case 'audio_sink_changed':
+        if (msg.data.success) {
+          audioSinks.update(s => ({
+            ...s,
+            default: msg.data.default,
+            sinks: s.sinks.map(sink => ({ ...sink, is_default: sink.name === msg.data.default })),
+          }));
+        }
         break;
       case 'cameras_snapshots':
         camerasData.set(msg.data);

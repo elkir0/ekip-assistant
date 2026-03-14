@@ -1,6 +1,6 @@
 <script>
   import { onMount } from 'svelte';
-  import { currentPage, assistantState, connectWS, wsConnected, fullscreenCam, transcript, speakingText } from './stores/assistant.js';
+  import { currentPage, assistantState, connectWS, wsConnected, fullscreenCam, transcript, speakingText, showSettings, audioSinks, sendWS } from './stores/assistant.js';
   import Music from './pages/Music.svelte';
   import Weather from './pages/Weather.svelte';
   import YouTube from './pages/YouTube.svelte';
@@ -24,6 +24,8 @@
   });
 
   function onTouchStart(e) {
+    // Don't swipe when settings panel is open
+    if ($showSettings) return;
     touchStartX = e.touches[0].clientX;
     swiping = true;
     touchDeltaX = 0;
@@ -52,6 +54,19 @@
     dragOffset = 0;
   }
 
+  function openSettings() {
+    showSettings.set(true);
+    sendWS({ type: 'audio_sinks' });
+  }
+
+  function closeSettings() {
+    showSettings.set(false);
+  }
+
+  function selectSink(name) {
+    sendWS({ type: 'audio_set_sink', data: name });
+  }
+
   // Clock
   let time = '';
   function updateClock() {
@@ -76,7 +91,14 @@
   <header class="top-bar">
     <span class="clock">{time}</span>
     <span class="brand">pi-board</span>
-    <span class="ws-dot" class:connected={$wsConnected}></span>
+    <div class="top-right">
+      <button class="settings-btn" on:click={openSettings} aria-label="Parametres">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+          <path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58a.49.49 0 00.12-.61l-1.92-3.32a.49.49 0 00-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54a.484.484 0 00-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96a.49.49 0 00-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.07.62-.07.94s.02.64.07.94l-2.03 1.58a.49.49 0 00-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6A3.6 3.6 0 1115.6 12 3.6 3.6 0 0112 15.6z"/>
+        </svg>
+      </button>
+      <span class="ws-dot" class:connected={$wsConnected}></span>
+    </div>
   </header>
 
   <div
@@ -117,6 +139,64 @@
           {#if $speakingText}{$speakingText}{:else}Parle...{/if}
         {/if}
       </span>
+    </div>
+  {/if}
+
+  {#if $showSettings}
+    <div class="settings-overlay" on:click|self={closeSettings} on:touchstart|stopPropagation on:touchmove|stopPropagation on:touchend|stopPropagation>
+      <div class="settings-panel">
+        <div class="settings-header">
+          <h2 class="settings-title">Parametres</h2>
+          <button class="settings-close" on:click={closeSettings}>
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/>
+            </svg>
+          </button>
+        </div>
+
+        <div class="settings-section">
+          <span class="settings-label">Sortie audio</span>
+          <div class="sinks-list">
+            {#each $audioSinks.sinks as sink}
+              <button
+                class="sink-item"
+                class:active={sink.is_default}
+                on:click={() => selectSink(sink.name)}
+              >
+                <div class="sink-info">
+                  <span class="sink-desc">{sink.description}</span>
+                  <span class="sink-name">{sink.name}</span>
+                </div>
+                {#if sink.is_default}
+                  <svg class="sink-check" width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/>
+                  </svg>
+                {/if}
+                {#if sink.state === 'RUNNING'}
+                  <span class="sink-active-dot"></span>
+                {/if}
+              </button>
+            {/each}
+            {#if $audioSinks.sinks.length === 0}
+              <p class="sinks-empty">Chargement...</p>
+            {/if}
+          </div>
+        </div>
+
+        <div class="settings-section">
+          <span class="settings-label">Systeme</span>
+          <div class="settings-info">
+            <span class="info-row">
+              <span class="info-key">WebSocket</span>
+              <span class="info-val" class:ok={$wsConnected}>{$wsConnected ? 'Connecte' : 'Deconnecte'}</span>
+            </span>
+            <span class="info-row">
+              <span class="info-key">Admin</span>
+              <a class="info-link" href="/admin/" target="_blank">Ouvrir le panneau</a>
+            </span>
+          </div>
+        </div>
+      </div>
     </div>
   {/if}
 
@@ -298,6 +378,197 @@
   @keyframes pillIn {
     from { transform: translateX(-50%) scale(0.8); opacity: 0; }
     to { transform: translateX(-50%) scale(1); opacity: 1; }
+  }
+
+  /* ──── Settings ──── */
+  .top-right {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .settings-btn {
+    background: none;
+    border: none;
+    color: #555;
+    padding: 6px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    -webkit-tap-highlight-color: transparent;
+    transition: color 200ms;
+  }
+  .settings-btn:active { color: #f0f0f0; }
+
+  .settings-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 50;
+    background: rgba(0, 0, 0, 0.6);
+    display: flex;
+    justify-content: flex-end;
+  }
+
+  .settings-panel {
+    width: 340px;
+    max-width: 85vw;
+    height: 100%;
+    background: #111118;
+    border-left: 1px solid rgba(255,255,255,0.06);
+    padding: 20px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 24px;
+    animation: slideIn 250ms ease-out;
+  }
+
+  @keyframes slideIn {
+    from { transform: translateX(100%); }
+    to { transform: translateX(0); }
+  }
+
+  .settings-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+
+  .settings-title {
+    font-size: 18px;
+    font-weight: 700;
+    color: #f0f0f0;
+    margin: 0;
+  }
+
+  .settings-close {
+    background: none;
+    border: none;
+    color: #888;
+    padding: 8px;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  .settings-section {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .settings-label {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    color: #6c63ff;
+    font-weight: 600;
+  }
+
+  .sinks-list {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .sink-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 12px 14px;
+    background: rgba(255,255,255,0.03);
+    border: 1px solid rgba(255,255,255,0.06);
+    border-radius: 10px;
+    cursor: pointer;
+    font-family: 'Inter', sans-serif;
+    text-align: left;
+    -webkit-tap-highlight-color: transparent;
+    transition: border-color 200ms;
+  }
+  .sink-item:active { background: rgba(255,255,255,0.06); }
+  .sink-item.active {
+    border-color: rgba(108, 99, 255, 0.4);
+    background: rgba(108, 99, 255, 0.08);
+  }
+
+  .sink-info {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+  }
+
+  .sink-desc {
+    font-size: 13px;
+    color: #f0f0f0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .sink-name {
+    font-size: 10px;
+    color: #555;
+    font-family: monospace;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .sink-check {
+    color: #6c63ff;
+    flex-shrink: 0;
+  }
+
+  .sink-active-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: #44ff88;
+    flex-shrink: 0;
+    animation: pulse 2s ease-in-out infinite;
+  }
+
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.4; }
+  }
+
+  .sinks-empty {
+    color: #555;
+    font-size: 13px;
+    padding: 12px;
+  }
+
+  .settings-info {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .info-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px 0;
+  }
+
+  .info-key {
+    font-size: 13px;
+    color: #888;
+  }
+
+  .info-val {
+    font-size: 13px;
+    color: #ff6b6b;
+    font-weight: 500;
+  }
+  .info-val.ok { color: #44ff88; }
+
+  .info-link {
+    font-size: 12px;
+    color: #6c63ff;
+    text-decoration: none;
   }
 
   .cam-fullscreen {

@@ -388,6 +388,99 @@ async def screen_scheduler():
         was_sleep = in_sleep
 
 
+# --- Audio sinks ---
+
+async def _get_audio_sinks() -> dict:
+    """List PipeWire/PulseAudio sinks with current default."""
+    import subprocess
+    loop = asyncio.get_event_loop()
+    try:
+        def _query():
+            default = subprocess.run(
+                ['pactl', 'get-default-sink'],
+                capture_output=True, text=True, timeout=5,
+            ).stdout.strip()
+
+            raw = subprocess.run(
+                ['pactl', 'list', 'sinks'],
+                capture_output=True, text=True, timeout=5,
+            ).stdout
+
+            sinks = []
+            current = {}
+            for line in raw.splitlines():
+                line = line.strip()
+                if line.startswith('Sink #'):
+                    if current:
+                        sinks.append(current)
+                    current = {'id': line.split('#')[1]}
+                elif line.startswith('Name:'):
+                    current['name'] = line.split(':', 1)[1].strip()
+                elif line.startswith('Description:'):
+                    current['description'] = line.split(':', 1)[1].strip()
+                elif line.startswith('State:'):
+                    current['state'] = line.split(':', 1)[1].strip()
+            if current:
+                sinks.append(current)
+
+            return {
+                'default': default,
+                'sinks': [
+                    {
+                        'name': s.get('name', ''),
+                        'description': s.get('description', s.get('name', '')),
+                        'state': s.get('state', ''),
+                        'is_default': s.get('name', '') == default,
+                    }
+                    for s in sinks
+                ],
+            }
+
+        return await loop.run_in_executor(None, _query)
+    except Exception as e:
+        logger.error("[AUDIO] Erreur liste sinks: %s", e)
+        return {'default': '', 'sinks': [], 'error': str(e)}
+
+
+async def _set_audio_sink(sink_name: str) -> dict:
+    """Set default PipeWire/PulseAudio sink and move all active streams to it."""
+    import subprocess
+    loop = asyncio.get_event_loop()
+    try:
+        def _apply():
+            # 1. Set default sink
+            subprocess.run(
+                ['pactl', 'set-default-sink', sink_name],
+                check=True, timeout=5,
+            )
+            # 2. Move ALL active sink-inputs (playing streams) to the new sink
+            inputs_raw = subprocess.run(
+                ['pactl', 'list', 'sink-inputs', 'short'],
+                capture_output=True, text=True, timeout=5,
+            ).stdout
+            moved = 0
+            for line in inputs_raw.strip().splitlines():
+                if not line.strip():
+                    continue
+                input_id = line.split()[0]
+                try:
+                    subprocess.run(
+                        ['pactl', 'move-sink-input', input_id, sink_name],
+                        check=True, timeout=5,
+                    )
+                    moved += 1
+                except Exception:
+                    pass
+            return sink_name, moved
+
+        result_name, moved = await loop.run_in_executor(None, _apply)
+        logger.info("[AUDIO] Sink par defaut: %s (%d flux deplaces)", result_name, moved)
+        return {'success': True, 'default': result_name, 'moved': moved}
+    except Exception as e:
+        logger.error("[AUDIO] Erreur set sink: %s", e)
+        return {'success': False, 'error': str(e)}
+
+
 # --- App lifecycle ---
 
 async def _start_spotify():
@@ -459,6 +552,7 @@ async def lifespan(app: FastAPI):
     )
     pipeline_task = asyncio.create_task(voice_pipeline())
     scheduler_task = asyncio.create_task(screen_scheduler())
+    watchdog_task = asyncio.create_task(music.token_watchdog())
     # Port 8888 redirect for Spotify OAuth callback (registered as http://127.0.0.1:8888/callback)
     proxy_server = await _start_oauth_proxy()
     logger.info("[PI-BOARD] Tous les services demarres")
@@ -467,6 +561,7 @@ async def lifespan(app: FastAPI):
     await audio_capture.stop()
     pipeline_task.cancel()
     scheduler_task.cancel()
+    watchdog_task.cancel()
     if proxy_server:
         proxy_server.close()
         await proxy_server.wait_closed()
@@ -615,6 +710,14 @@ async def websocket_endpoint(ws: WebSocket):
             elif msg.get("type") == "weather_refresh":
                 data = await weather.get_current()
                 await ws.send_json({"type": "weather", "data": data})
+            elif msg.get("type") == "audio_sinks":
+                sinks = await _get_audio_sinks()
+                await ws.send_json({"type": "audio_sinks", "data": sinks})
+            elif msg.get("type") == "audio_set_sink":
+                sink_name = msg.get("data", "")
+                if sink_name:
+                    result = await _set_audio_sink(sink_name)
+                    await ws.send_json({"type": "audio_sink_changed", "data": result})
             elif msg.get("type") == "cameras_list":
                 cams = await cameras.get_cameras()
                 await ws.send_json({"type": "cameras_list", "data": cams})
@@ -645,28 +748,74 @@ async def api_spotify_current():
 
 @app.get("/api/spotify/reauth")
 async def api_spotify_reauth():
-    """Generate Spotify OAuth URL and redirect the browser to it."""
+    """Show a styled intermediate page that redirects to Spotify auth."""
     url = music.get_auth_url()
     if not url:
         return JSONResponse({"error": "Spotify non configure"}, status_code=400)
-    return RedirectResponse(url)
+    from fastapi.responses import HTMLResponse
+    html = f"""<!DOCTYPE html>
+<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width">
+<style>
+body {{ background: #0a0a0f; color: #f0f0f0; font-family: Inter, sans-serif;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  height: 100vh; margin: 0; gap: 20px; }}
+.spinner {{ width: 40px; height: 40px; border: 3px solid #333; border-top-color: #1DB954;
+  border-radius: 50%; animation: spin 1s linear infinite; }}
+@keyframes spin {{ to {{ transform: rotate(360deg); }} }}
+h2 {{ font-size: 18px; color: #1DB954; margin: 0; }}
+p {{ font-size: 13px; color: #888; margin: 0; }}
+a {{ color: #6c63ff; font-size: 13px; margin-top: 20px; }}
+</style>
+</head><body>
+<div class="spinner"></div>
+<h2>Connexion a Spotify...</h2>
+<p>Vous allez etre redirige</p>
+<a href="/">Annuler et revenir</a>
+<script>setTimeout(function() {{ window.location.href = "{url}"; }}, 1500);</script>
+</body></html>"""
+    return HTMLResponse(html)
 
 
 @app.get("/api/spotify/callback")
 async def api_spotify_callback(code: str = ""):
-    """Handle Spotify OAuth callback, then redirect back to the app."""
+    """Handle Spotify OAuth callback with styled result page."""
+    from fastapi.responses import HTMLResponse
     if not code:
         return JSONResponse({"error": "Code manquant"}, status_code=400)
     success = await music.handle_callback(code)
     if success:
-        return RedirectResponse("/")
-    return JSONResponse({"error": "Echec authentification Spotify"}, status_code=500)
+        icon = "&#10004;"
+        color = "#1DB954"
+        title = "Spotify connecte !"
+        detail = "Retour a l'interface..."
+    else:
+        icon = "&#10008;"
+        color = "#ff6b6b"
+        title = "Echec de connexion"
+        detail = "Retour automatique dans 3 secondes"
+    html = f"""<!DOCTYPE html>
+<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width">
+<style>
+body {{ background: #0a0a0f; color: #f0f0f0; font-family: Inter, sans-serif;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  height: 100vh; margin: 0; gap: 16px; }}
+.icon {{ font-size: 48px; color: {color}; }}
+h2 {{ font-size: 20px; color: {color}; margin: 0; }}
+p {{ font-size: 13px; color: #888; margin: 0; }}
+</style>
+</head><body>
+<span class="icon">{icon}</span>
+<h2>{title}</h2>
+<p>{detail}</p>
+<script>setTimeout(function() {{ window.location.href = "/"; }}, 2000);</script>
+</body></html>"""
+    return HTMLResponse(html)
 
 
 @app.get("/callback")
 async def legacy_spotify_callback(code: str = ""):
-    """Legacy redirect URI (http://127.0.0.1:8888/callback) — forward to real handler."""
-    return await api_spotify_callback(code)
+    """Legacy redirect URI (http://127.0.0.1:8888/callback -> port 8000) — forward to real handler."""
+    return await api_spotify_callback(code=code)
 
 
 @app.get("/api/youtube/login")

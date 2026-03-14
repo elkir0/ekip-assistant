@@ -1,5 +1,5 @@
 <script>
-  import { musicData, assistantState, transcript, volumeLevel, musicQueue, musicSearchResults, musicPlaylists, spotifyStatus, spotifyReauthUrl, sendWS } from '../stores/assistant.js';
+  import { musicData, assistantState, transcript, volumeLevel, musicQueue, musicSearchResults, musicPlaylists, spotifyStatus, spotifyReauthUrl, spotifyAuthQr, sendWS } from '../stores/assistant.js';
   import VirtualKeyboard from '../components/VirtualKeyboard.svelte';
 
   import { onMount, onDestroy } from 'svelte';
@@ -116,19 +116,33 @@
     setTimeout(() => { retrying = false; }, 5000);
   }
 
-  function reauthSpotify() {
-    // Open the reauth in a popup/new tab so kiosk stays alive
-    // On Pi kiosk this will navigate the main window — backend redirects back to / after auth
-    window.location.href = '/api/spotify/reauth';
-  }
-
   // Spotify needs auth if no cache or no client
-  $: spotifyNeedsAuth = $spotifyStatus === 'auth_required' || $spotifyStatus === 'not_connected';
-  $: spotifyShowBanner = $spotifyStatus !== 'ok' && $spotifyStatus !== 'loading';
+  $: spotifyNeedsAuth = $spotifyStatus === 'auth_required';
+  $: spotifyShowBanner = $spotifyStatus !== 'ok' && $spotifyStatus !== 'loading' && !spotifyNeedsAuth;
 </script>
 
 <div class="music-page">
-  {#if spotifyShowBanner}
+  {#if spotifyNeedsAuth}
+    <!-- Spotify re-auth overlay -->
+    <div class="spotify-qr-overlay">
+      <div class="qr-card">
+        <div class="qr-icon">
+          <svg width="48" height="48" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M12 0C5.4 0 0 5.4 0 12s5.4 12 12 12 12-5.4 12-12S18.66 0 12 0zm5.521 17.34c-.24.359-.66.48-1.021.24-2.82-1.74-6.36-2.101-10.561-1.141-.418.122-.779-.179-.899-.539-.12-.421.18-.78.54-.9 4.56-1.021 8.52-.6 11.64 1.32.42.18.479.659.301 1.02zm1.44-3.3c-.301.42-.841.6-1.262.3-3.239-1.98-8.159-2.58-11.939-1.38-.479.12-1.02-.12-1.14-.6-.12-.48.12-1.021.6-1.141C9.6 9.9 15 10.561 18.72 12.84c.361.181.54.78.241 1.2zm.12-3.36C15.24 8.4 8.82 8.16 5.16 9.301c-.6.179-1.2-.181-1.38-.721-.18-.601.18-1.2.72-1.381 4.26-1.26 11.28-1.02 15.721 1.621.539.3.719 1.02.419 1.56-.299.421-1.02.599-1.559.3z"/>
+          </svg>
+        </div>
+        <h2 class="qr-title">Spotify deconnecte</h2>
+        <p class="qr-subtitle">Appuyez pour reconnecter votre compte</p>
+        <button class="qr-connect-btn" on:click={() => window.location.href = '/api/spotify/reauth'}>
+          Connecter Spotify
+        </button>
+        <p class="qr-hint">Vous serez redirige vers Spotify pour autoriser l'acces. Utilisez le QR code Spotify pour vous connecter depuis votre telephone.</p>
+        <button class="qr-retry" on:click={retrySpotify} disabled={retrying}>
+          {retrying ? 'Verification...' : 'Deja connecte ? Verifier'}
+        </button>
+      </div>
+    </div>
+  {:else if spotifyShowBanner}
     <div class="spotify-recovery">
       <div class="recovery-icon">
         <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
@@ -139,20 +153,13 @@
         {#if $spotifyStatus === 'no_credentials'}
           <span class="recovery-title">Spotify non configure</span>
           <span class="recovery-detail">Cles API manquantes dans .env</span>
-        {:else if spotifyNeedsAuth}
-          <span class="recovery-title">Spotify deconnecte</span>
-          <span class="recovery-detail">Appuyez pour connecter votre compte</span>
         {:else}
           <span class="recovery-title">Spotify indisponible</span>
           <span class="recovery-detail">Connexion perdue</span>
         {/if}
       </div>
       <div class="recovery-actions">
-        {#if spotifyNeedsAuth}
-          <button class="recovery-btn primary" on:click={reauthSpotify}>
-            Connecter Spotify
-          </button>
-        {:else if $spotifyStatus !== 'no_credentials'}
+        {#if $spotifyStatus !== 'no_credentials'}
           <button class="recovery-btn" on:click={retrySpotify} disabled={retrying}>
             {retrying ? 'Connexion...' : 'Reessayer'}
           </button>
@@ -743,6 +750,88 @@
     white-space: nowrap;
   }
 
+  /* ──── Spotify QR overlay ──── */
+  .spotify-qr-overlay {
+    position: absolute;
+    inset: 0;
+    background: rgba(10, 10, 15, 0.95);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 30;
+  }
+
+  .qr-card {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 12px;
+    padding: 32px 40px;
+    max-width: 380px;
+  }
+
+  .qr-icon {
+    color: #1DB954;
+    margin-bottom: 4px;
+  }
+
+  .qr-title {
+    font-size: 20px;
+    font-weight: 700;
+    color: #f0f0f0;
+    margin: 0;
+  }
+
+  .qr-subtitle {
+    font-size: 14px;
+    color: #aaa;
+    margin: 0;
+  }
+
+  .qr-connect-btn {
+    background: #1DB954;
+    border: none;
+    color: #fff;
+    font-size: 16px;
+    font-weight: 600;
+    padding: 16px 48px;
+    border-radius: 28px;
+    cursor: pointer;
+    font-family: 'Inter', sans-serif;
+    -webkit-tap-highlight-color: transparent;
+    margin: 8px 0;
+    transition: opacity 150ms, transform 100ms;
+  }
+  .qr-connect-btn:active {
+    opacity: 0.8;
+    transform: scale(0.96);
+  }
+
+  .qr-hint {
+    font-size: 12px;
+    color: #666;
+    text-align: center;
+    line-height: 1.5;
+    margin: 0;
+    max-width: 260px;
+  }
+
+  .qr-retry {
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    color: #aaa;
+    font-size: 12px;
+    font-weight: 500;
+    padding: 8px 20px;
+    border-radius: 8px;
+    cursor: pointer;
+    font-family: 'Inter', sans-serif;
+    -webkit-tap-highlight-color: transparent;
+    margin-top: 4px;
+  }
+  .qr-retry:active { opacity: 0.7; }
+  .qr-retry:disabled { opacity: 0.4; }
+
   /* ──── Spotify recovery banner ──── */
   .spotify-recovery {
     position: absolute;
@@ -805,11 +894,7 @@
   .recovery-btn:active { opacity: 0.7; }
   .recovery-btn:disabled { opacity: 0.4; cursor: default; }
 
-  .recovery-btn.primary {
-    background: rgba(108, 99, 255, 0.3);
-    border-color: rgba(108, 99, 255, 0.5);
-    color: #c4bfff;
-  }
+
 
   /* ──── Playlists panel ──── */
   .playlists-panel {
