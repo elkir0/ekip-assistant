@@ -90,20 +90,30 @@ class DevialetService:
             self._get("/systems/current/settings/audio/nightMode"),
             self._get("/systems/current/settings/audio/equalizer"),
         )
+        connected = device is not None
+        fw = (device or {}).get("release", {})
         return {
-            "device": {
-                "model": (device or {}).get("model"),
-                "name": (device or {}).get("deviceName"),
-                "firmware": (device or {}).get("release"),
-            },
-            "system": {
-                "name": (system or {}).get("systemName"),
-                "devices": (system or {}).get("devices", []),
-            },
-            "source": (source or {}).get("type") if source else None,
+            "connected": connected,
+            "model": (device or {}).get("model", ""),
+            "systemName": (system or {}).get("systemName", "Devialet"),
+            "firmware": fw.get("version", "") if isinstance(fw, dict) else str(fw),
             "volume": (vol or {}).get("volume") if vol else None,
-            "nightMode": (night or {}).get("nightMode"),
-            "equalizer": (eq or {}).get("preset"),
+            "nightMode": (night or {}).get("nightMode") == "on" if night else False,
+            "eqPreset": (eq or {}).get("preset", "flat"),
+            "currentSource": (source or {}).get("source", {}).get("type") if source and source.get("source") else None,
+            "playingState": (source or {}).get("playingState"),
+            "muteState": (source or {}).get("muteState"),
+            "metadata": (source or {}).get("metadata"),
+            "sources": [s.get("type") for s in ((await self.get_sources()) or [])],
+            "devices": [
+                {
+                    "name": d.get("deviceName", ""),
+                    "role": d.get("role", ""),
+                    "serial": d.get("serial", ""),
+                    "isLeader": d.get("isSystemLeader", False),
+                }
+                for d in (system or {}).get("devices", [])
+            ],
         }
 
     # ------------------------------------------------------------------
