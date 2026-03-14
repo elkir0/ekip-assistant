@@ -876,6 +876,30 @@ async def api_youtube_login():
     return RedirectResponse("https://www.youtube.com")
 
 
+@app.get("/api/youtube/audio-proxy")
+async def api_youtube_audio_proxy():
+    """Proxy YouTube audio stream for UPnP playback (Devialet can't access HTTPS googlevideo)."""
+    proxy_url = getattr(youtube, '_current_audio_proxy_url', None)
+    if not proxy_url:
+        return JSONResponse({"error": "No audio stream"}, status_code=404)
+
+    import httpx
+
+    async def _stream():
+        async with httpx.AsyncClient() as client:
+            async with client.stream("GET", proxy_url, timeout=60) as resp:
+                async for chunk in resp.aiter_bytes(chunk_size=65536):
+                    yield chunk
+
+    return StreamingResponse(_stream(), media_type="audio/webm")
+
+
+# Serve UPnP audio files (TTS, etc.)
+upnp_audio_dir = Path(__file__).parent / ".." / "frontend" / "dist" / "upnp_audio"
+upnp_audio_dir.mkdir(exist_ok=True)
+app.mount("/upnp_audio", StaticFiles(directory=upnp_audio_dir), name="upnp-audio")
+
+
 @app.get("/api/cameras/{camera_id}/stream")
 async def api_camera_stream(camera_id: str):
     return StreamingResponse(

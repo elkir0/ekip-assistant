@@ -228,12 +228,28 @@ class YouTubeController:
         env = {**os.environ, "PULSE_SINK": sink_name}
         cache_ms = cfg.get("network_cache_ms", 5000)
 
-        # Use mpv (VLC 3.0.23 broken with HTTPS streams on Pi)
+        # Try UPnP for audio (Devialet fetches directly, 0% CPU)
+        upnp_audio = False
+        if len(stream_urls) >= 2:
+            try:
+                from audio import upnp_player
+                # Proxy the audio URL through Pi's HTTP server for Devialet
+                audio_url = stream_urls[1]
+                # Store audio URL for proxy endpoint
+                self._current_audio_proxy_url = audio_url
+                pi_ip = upnp_player._get_pi_ip()
+                proxy_url = f"http://{pi_ip}:8000/api/youtube/audio-proxy"
+                upnp_audio = await upnp_player.play_url(proxy_url, title="YouTube", mime="audio/webm")
+                if upnp_audio:
+                    logger.info("[YOUTUBE] Audio via UPnP (Devialet direct)")
+            except Exception as e:
+                logger.warning("[YOUTUBE] UPnP audio echoue: %s — fallback mpv", e)
+
+        # Use mpv for video (+ audio if UPnP failed)
         cache_secs = max(10, cache_ms // 1000)
         player_args = [
             "mpv",
             "--fullscreen",
-            "--ao=pulse",
             "--vo=gpu",
             "--gpu-context=wayland",
             "--no-terminal",
@@ -241,10 +257,15 @@ class YouTubeController:
             f"--demuxer-readahead-secs={cache_secs}",
             "--demuxer-max-bytes=80M",
             "--hwdec=no",
-            "--audio-buffer=1",
         ]
-        if len(stream_urls) >= 2 and stream_urls[1]:
-            player_args.append(f"--audio-file={stream_urls[1]}")
+        if upnp_audio:
+            # Video only via mpv, audio via UPnP to Devialet
+            player_args.append("--no-audio")
+        else:
+            # Both audio + video via mpv → PipeWire → AirPlay
+            player_args.extend(["--ao=pulse", "--audio-buffer=1"])
+            if len(stream_urls) >= 2 and stream_urls[1]:
+                player_args.append(f"--audio-file={stream_urls[1]}")
         player_args.append(stream_urls[0])
 
         logger.info("[YOUTUBE] Lancement mpv: %d args, video=%s", len(player_args), url)
