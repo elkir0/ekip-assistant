@@ -643,6 +643,14 @@ async def _start_spotify():
     """Start Spotify in background so rate limits don't block server startup."""
     try:
         await music.start()
+        # Always max Spotify volume — Devialet is the only volume control
+        if music.status == "ok":
+            await asyncio.sleep(2)
+            try:
+                await music.spotify_volume(100)
+                logger.info("[SPOTIFY] Volume API force a 100%%")
+            except Exception:
+                pass
     except Exception as e:
         logger.error("[SPOTIFY] Erreur au demarrage: %s", e)
 
