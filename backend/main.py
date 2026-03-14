@@ -68,6 +68,7 @@ async def handle_music_play(query: str):
     memory.add("MUSIC_PLAY", query, result)
     if result.get("playing"):
         await asyncio.sleep(1)
+        await devialet.ensure_volume()  # Prevent AirPlay volume reset
         queue = await music.get_queue()
         await broadcast({"type": "music_queue", "data": queue})
         await speak(f"Je lance {result['title']} de {result['artist']}")
@@ -93,6 +94,7 @@ async def handle_music_resume(_query: str):
 async def handle_music_next(_query: str):
     result = await music.next_track()
     await broadcast({"type": "music", "data": result})
+    await devialet.ensure_volume()  # Prevent AirPlay volume reset
     memory.add("MUSIC_NEXT", "", result)
     if result.get("title"):
         await speak(f"Morceau suivant: {result['title']}")

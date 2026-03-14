@@ -24,6 +24,7 @@ class DevialetService:
         self.ip = ip or DEVIALET_IP
         self.base = f"http://{self.ip}/ipcontrol/v1"
         self._loop: Optional[asyncio.AbstractEventLoop] = None
+        self._last_volume: Optional[int] = None
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -121,22 +122,21 @@ class DevialetService:
     # ------------------------------------------------------------------
 
     async def set_volume(self, percent: int) -> bool:
-        """Set volume (0-100). Also syncs PipeWire to prevent AirPlay reset."""
+        """Set volume (0-100) on Devialet only. PipeWire stays at 100%."""
         percent = max(0, min(100, percent))
-        ok = await self._post(
+        self._last_volume = percent
+        return await self._post(
             "/systems/current/sources/current/soundControl/volume",
             {"volume": percent},
         )
-        # Sync PipeWire sink volume to match — AirPlay ties them together
-        try:
-            import subprocess
-            subprocess.run(
-                ["pactl", "set-sink-volume", "@DEFAULT_SINK@", f"{percent}%"],
-                timeout=2, capture_output=True,
+
+    async def ensure_volume(self):
+        """Re-apply last known volume (call after track change to prevent AirPlay reset)."""
+        if self._last_volume is not None:
+            await self._post(
+                "/systems/current/sources/current/soundControl/volume",
+                {"volume": self._last_volume},
             )
-        except Exception:
-            pass
-        return ok
 
     async def volume_up(self) -> bool:
         return await self._post(
