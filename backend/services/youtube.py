@@ -7,7 +7,7 @@ from typing import Any, Callable, Coroutine
 
 logger = logging.getLogger(__name__)
 
-YT_FORMAT_DEFAULT = "bestvideo[height<=720][vcodec^=avc]+bestaudio/bestvideo[height<=720]+bestaudio/best[height<=720]/best"
+YT_FORMAT_DEFAULT = "best[height<=480][vcodec^=avc]/bestvideo[height<=480][vcodec^=avc]+bestaudio/best[height<=480]/bestvideo[height<=480]+bestaudio/best"
 YT_COOKIES = os.path.join(os.path.dirname(__file__), '..', '..', 'yt-cookies.txt')
 
 
