@@ -226,46 +226,44 @@ class YouTubeController:
         logger.info("[YOUTUBE] Sink audio: %s, %d stream URLs", sink_name, len(stream_urls))
         env = {**os.environ, "PULSE_SINK": sink_name}
         cache_ms = cfg.get("network_cache_ms", 5000)
-        vlc_args = [
-            "vlc",
+
+        # Use mpv (VLC 3.0.23 broken with HTTPS streams on Pi)
+        player_args = [
+            "mpv",
             "--fullscreen",
-            "--play-and-exit",
-            "--aout=pulse",
-            "--no-video-title-show",
-            "--quiet",
-            f"--network-caching={cache_ms}",
-            f"--file-caching={cache_ms}",
-            f"--live-caching={cache_ms}",
-            "--clock-jitter=0",
-            "--avcodec-skiploopfilter=4",
+            "--ao=pulse",
+            "--no-terminal",
+            f"--cache-secs={cache_ms // 1000}",
+            "--demuxer-max-bytes=50M",
+            "--hwdec=auto",
         ]
         if len(stream_urls) >= 2 and stream_urls[1]:
-            vlc_args.append(f"--input-slave={stream_urls[1]}")
-        vlc_args.append(stream_urls[0])
+            player_args.append(f"--audio-file={stream_urls[1]}")
+        player_args.append(stream_urls[0])
 
-        logger.info("[YOUTUBE] Lancement VLC: %d args, video=%s", len(vlc_args), url)
+        logger.info("[YOUTUBE] Lancement mpv: %d args, video=%s", len(player_args), url)
         self._vlc_process = await asyncio.create_subprocess_exec(
-            *vlc_args,
+            *player_args,
             stdout=asyncio.subprocess.DEVNULL,
             stderr=asyncio.subprocess.PIPE,
             env=env,
         )
 
-        # Wait briefly to check VLC didn't die immediately
+        # Wait briefly to check player didn't die immediately
         await asyncio.sleep(2)
         if self._vlc_process.returncode is not None:
             exit_code = self._vlc_process.returncode
-            vlc_err = ""
+            player_err = ""
             try:
-                vlc_stderr = await asyncio.wait_for(self._vlc_process.stderr.read(2000), timeout=1)
-                vlc_err = vlc_stderr.decode().strip()[:300]
+                stderr_data = await asyncio.wait_for(self._vlc_process.stderr.read(2000), timeout=1)
+                player_err = stderr_data.decode().strip()[:300]
             except Exception:
                 pass
-            logger.error("[YOUTUBE] VLC mort immediatement (code %d): %s", exit_code, vlc_err)
+            logger.error("[YOUTUBE] mpv mort immediatement (code %d): %s", exit_code, player_err)
             self._vlc_process = None
-            return {"playing": False, "error": f"VLC echoue (code {exit_code})"}
+            return {"playing": False, "error": f"mpv echoue (code {exit_code})"}
 
-        logger.info("[YOUTUBE] VLC demarre OK (PID %d)", self._vlc_process.pid)
+        logger.info("[YOUTUBE] mpv demarre OK (PID %d)", self._vlc_process.pid)
 
         # Watch for natural VLC exit → play next in queue
         asyncio.create_task(self._watch_vlc())
@@ -283,7 +281,7 @@ class YouTubeController:
 
                 # If VLC died very fast, it's an error not a natural end
                 if duration < 5:
-                    logger.warning("[YOUTUBE] VLC termine trop vite (%.1fs, code %s) — skip", duration, exit_code)
+                    logger.warning("[YOUTUBE] mpv termine trop vite (%.1fs, code %s) — skip", duration, exit_code)
                     # Don't chain next, just clean up
                     if self._on_wakeword_resume:
                         try:
@@ -299,7 +297,7 @@ class YouTubeController:
                         await self._on_finish_callback()
                     return
 
-                logger.info("[YOUTUBE] VLC termine naturellement (%.0fs)", duration)
+                logger.info("[YOUTUBE] mpv termine naturellement (%.0fs)", duration)
 
                 # If stopped manually, don't play next
                 if self._stopped:
@@ -341,7 +339,7 @@ class YouTubeController:
                 if self._on_finish_callback:
                     await self._on_finish_callback()
         except Exception as e:
-            logger.error("[YOUTUBE] Erreur watcher VLC: %s", e)
+            logger.error("[YOUTUBE] Erreur watcher mpv: %s", e)
 
     async def _stop_vlc(self):
         """Stop VLC without resuming Spotify or clearing queue."""
@@ -349,7 +347,7 @@ class YouTubeController:
             try:
                 self._vlc_process.send_signal(signal.SIGTERM)
                 await asyncio.wait_for(self._vlc_process.wait(), timeout=3)
-                logger.info("[YOUTUBE] VLC arrete")
+                logger.info("[YOUTUBE] mpv arrete")
             except (asyncio.TimeoutError, ProcessLookupError):
                 self._vlc_process.kill()
             self._vlc_process = None
