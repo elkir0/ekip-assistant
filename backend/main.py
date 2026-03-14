@@ -372,25 +372,8 @@ async def speak(text: str):
     memory.set_tts(text)
     await set_state("SPEAKING")
     await broadcast({"type": "speaking", "data": text})
-
-    # Duck Devialet volume during TTS, restore after
-    saved_vol = None
-    try:
-        dev_status = await asyncio.wait_for(devialet.get_status(), timeout=2)
-        saved_vol = dev_status.get("volume")
-    except Exception:
-        pass
-
-    async def duck(vol):
-        try:
-            if vol == 100 and saved_vol:
-                await devialet.set_volume(saved_vol)
-            elif vol < 100 and saved_vol:
-                await devialet.set_volume(max(10, saved_vol // 3))
-        except Exception:
-            pass
-
-    await tts.speak(text, duck_callback=duck)
+    # No ducking — TTS and music share the same AirPlay output
+    await tts.speak(text)
     await set_state("IDLE")
 
 
@@ -448,18 +431,8 @@ async def on_wake():
     if wake_detector:
         wake_detector.paused = True
 
-    # Duck music via Devialet volume so the mic hears the user clearly
+    # No volume ducking — causes more problems than it solves
     _wake_saved_vol = None
-    try:
-        dev_status = await asyncio.wait_for(devialet.get_status(), timeout=2)
-        current_vol = dev_status.get("volume")
-        if current_vol and current_vol > 20:
-            _wake_saved_vol = current_vol
-            duck_vol = max(10, current_vol // 3)
-            await devialet.set_volume(duck_vol)
-            logger.info("[PIPELINE] Devialet ducke %d%% -> %d%%", current_vol, duck_vol)
-    except (asyncio.TimeoutError, Exception):
-        pass
 
     await set_state("LISTENING")
 
@@ -496,13 +469,7 @@ async def on_wake():
         except Exception as e:
             logger.error("[PIPELINE] Erreur handler %s: %s", intent, e)
 
-    # Restore Devialet volume if we ducked it at wake
-    if _wake_saved_vol is not None:
-        try:
-            await devialet.set_volume(_wake_saved_vol)
-            logger.info("[PIPELINE] Devialet volume restaure %d%%", _wake_saved_vol)
-        except Exception:
-            pass
+    # Volume not ducked — nothing to restore
 
     # Return to IDLE
     await set_state("IDLE")
@@ -550,14 +517,14 @@ async def screen_scheduler():
         in_sleep = hour >= 22 or hour < 6
         in_quiet = hour >= 20 or hour < 8
 
-        # Volume transitions (skip if user overrode manually)
+        # Volume transitions via Devialet (skip if user overrode manually)
         if not volume_manual_override:
             if in_quiet and not was_quiet:
-                await music.set_volume(30)
+                await devialet.set_volume(30)
                 await broadcast({"type": "volume", "data": 30})
                 logger.info("[VOLUME] Mode nuit 30%%")
             elif not in_quiet and was_quiet:
-                await music.set_volume(50)
+                await devialet.set_volume(50)
                 await broadcast({"type": "volume", "data": 50})
                 logger.info("[VOLUME] Mode jour 50%%")
         # Reset override on period transition so next auto-change works
