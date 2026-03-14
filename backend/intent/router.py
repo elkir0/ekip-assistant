@@ -5,20 +5,37 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 INTENT_KEYWORDS = {
-    "MUSIC_PLAY": ["mets", "joue", "lance", "musique", "ecouter"],
+    # Music
+    "MUSIC_PLAY": ["mets", "joue", "lance", "musique", "ecouter", "écouter"],
     "MUSIC_PAUSE": ["pause", "stop", "arrete", "arrête"],
+    "MUSIC_RESUME": ["reprends", "continue", "relance"],
     "MUSIC_NEXT": ["suivant", "suivante", "passe", "skip", "prochaine", "change"],
+    "MUSIC_PREV": ["precedent", "précédent", "precedente", "précédente", "reviens", "avant"],
     "MUSIC_VOLUME_UP": ["plus fort", "monte le son", "augmente", "monte le volume"],
     "MUSIC_VOLUME_DOWN": ["moins fort", "baisse le son", "diminue", "baisse le volume", "baisser le son", "baisser"],
+    "MUSIC_VOLUME_SET": ["volume a", "volume à", "son a", "son à"],
+    "MUSIC_WHAT": ["c'est quoi", "c'est qui", "quel morceau", "quelle chanson", "qui chante", "quel artiste"],
+    "MUSIC_PLAYLIST": ["playlist", "ma playlist", "mes playlists"],
+    # YouTube
     "YOUTUBE_PLAY": ["youtube", "video", "vidéo", "regarde", "montre", "clip", "dessin anime", "dessin animé", "épisode", "episode"],
     "YOUTUBE_STOP": ["ferme", "quitte", "stop video", "stop vidéo"],
-    "WEATHER": ["meteo", "météo", "temps", "temperature", "température", "pluie", "soleil"],
+    # Weather
+    "WEATHER": ["meteo", "météo", "temps qu'il fait", "temperature", "température", "pluie", "soleil", "temps dehors"],
+    # System
     "SLEEP": ["dodo", "dort", "dors", "eteins", "éteins", "bonne nuit", "nuit"],
     "WAKE": ["reveille", "réveille", "allume", "debout", "leve", "lève"],
+    "TIME": ["heure", "quelle heure"],
+    "REPEAT": ["repete", "répète", "redis", "repeter", "répéter", "redit"],
+    "CANCEL": ["annule", "non merci", "rien", "laisse tomber", "oublie"],
+    "TIMER": ["minuteur", "timer", "chrono", "rappelle moi dans", "dans minutes"],
 }
 
 # Control intents have priority over content intents when both match
-PRIORITY_INTENTS = {"MUSIC_VOLUME_DOWN", "MUSIC_VOLUME_UP", "MUSIC_NEXT", "MUSIC_PAUSE", "YOUTUBE_STOP"}
+PRIORITY_INTENTS = {
+    "MUSIC_VOLUME_DOWN", "MUSIC_VOLUME_UP", "MUSIC_VOLUME_SET",
+    "MUSIC_NEXT", "MUSIC_PREV", "MUSIC_PAUSE", "MUSIC_RESUME",
+    "MUSIC_WHAT", "YOUTUBE_STOP", "CANCEL", "REPEAT", "TIME",
+}
 
 
 def extract_query(text: str, intent: str) -> str:
@@ -26,7 +43,7 @@ def extract_query(text: str, intent: str) -> str:
     cleaned = text.lower().strip().rstrip(".")
 
     # Remove wake word
-    for wake in ["hey pi", "pi board", "piboard"]:
+    for wake in ["hey pi", "pi board", "piboard", "terminator"]:
         cleaned = cleaned.replace(wake, "")
 
     # Remove intent trigger words (longest first to avoid partial matches)
@@ -41,6 +58,24 @@ def extract_query(text: str, intent: str) -> str:
     cleaned = re.sub(r"\s+", " ", cleaned).strip()
 
     return cleaned
+
+
+def extract_volume_value(text: str) -> int | None:
+    """Extract a volume percentage from text like 'volume a 30%'."""
+    m = re.search(r'(\d+)\s*%?', text)
+    if m:
+        val = int(m.group(1))
+        if 0 <= val <= 100:
+            return val
+    return None
+
+
+def extract_timer_minutes(text: str) -> int | None:
+    """Extract timer duration from text like 'minuteur 10 minutes'."""
+    m = re.search(r'(\d+)\s*(?:minute|min)', text)
+    if m:
+        return int(m.group(1))
+    return None
 
 
 def route(text: str) -> tuple[str, str]:

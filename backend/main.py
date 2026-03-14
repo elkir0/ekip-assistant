@@ -19,7 +19,8 @@ from services.cameras import CameraService
 from services.devialet import DevialetService
 from services.llm import LLMHandler
 from services.tts import TTSEngine
-from intent.router import route
+from intent.router import route, extract_volume_value, extract_timer_minutes
+from memory.context import memory
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
 logger = logging.getLogger(__name__)
@@ -64,6 +65,7 @@ async def handle_music_play(query: str):
         query = cleaned
     result = await music.search_and_play(query)
     await broadcast({"type": "music", "data": result})
+    memory.add("MUSIC_PLAY", query, result)
     if result.get("playing"):
         await asyncio.sleep(1)
         queue = await music.get_queue()
@@ -76,20 +78,125 @@ async def handle_music_play(query: str):
 async def handle_music_pause(_query: str):
     await music.pause()
     await broadcast({"type": "music", "data": {"playing": False}})
+    memory.add("MUSIC_PAUSE", "")
+
+
+async def handle_music_resume(_query: str):
+    await music.resume()
+    current = await music.get_current()
+    await broadcast({"type": "music", "data": current})
+    memory.add("MUSIC_RESUME", "")
+    if current.get("title"):
+        await speak(f"Je reprends {current['title']}")
 
 
 async def handle_music_next(_query: str):
     result = await music.next_track()
     await broadcast({"type": "music", "data": result})
+    memory.add("MUSIC_NEXT", "", result)
     if result.get("title"):
         await speak(f"Morceau suivant: {result['title']}")
 
 
-async def handle_music_volume(direction: str, _query: str):
+async def handle_music_prev(_query: str):
+    result = await music.previous_track()
     current = await music.get_current()
-    delta = 20 if direction == "up" else -20
-    new_vol = max(0, min(100, 50 + delta))  # simplified
+    await broadcast({"type": "music", "data": current})
+    memory.add("MUSIC_PREV", "")
+
+
+async def handle_music_volume_up(_query: str):
+    current_vol = await music.get_volume()
+    new_vol = min(100, current_vol + 15)
     await music.set_volume(new_vol)
+    await broadcast({"type": "volume", "data": new_vol})
+    memory.add("MUSIC_VOLUME_UP", str(new_vol))
+
+
+async def handle_music_volume_down(_query: str):
+    current_vol = await music.get_volume()
+    new_vol = max(0, current_vol - 15)
+    await music.set_volume(new_vol)
+    await broadcast({"type": "volume", "data": new_vol})
+    memory.add("MUSIC_VOLUME_DOWN", str(new_vol))
+
+
+async def handle_music_volume_set(query: str):
+    val = extract_volume_value(query)
+    if val is not None:
+        await music.set_volume(val)
+        await broadcast({"type": "volume", "data": val})
+        memory.add("MUSIC_VOLUME_SET", str(val))
+        await speak(f"Volume a {val} pourcent")
+    else:
+        await speak("Je n'ai pas compris le volume souhaite")
+
+
+async def handle_music_what(_query: str):
+    current = await music.get_current()
+    if current.get("title"):
+        artist = current.get("artist", "")
+        title = current.get("title", "")
+        album = current.get("album", "")
+        response = f"C'est {title} de {artist}"
+        if album:
+            response += f", album {album}"
+        await speak(response)
+    else:
+        await speak("Il n'y a pas de musique en cours")
+
+
+async def handle_music_playlist(query: str):
+    if query:
+        # Search for a specific playlist
+        playlists = await music.get_playlists()
+        for pl in playlists:
+            if query.lower() in pl["name"].lower():
+                result = await music.play_playlist(pl["uri"])
+                await broadcast({"type": "music", "data": result})
+                memory.add("MUSIC_PLAYLIST", pl["name"], result)
+                await speak(f"Je lance la playlist {pl['name']}")
+                return
+        await speak(f"Je n'ai pas trouve de playlist {query}")
+    else:
+        await speak("Dis-moi quelle playlist tu veux")
+
+
+async def handle_time(_query: str):
+    from datetime import datetime
+    now = datetime.now()
+    h, m = now.hour, now.minute
+    if m == 0:
+        await speak(f"Il est {h} heures pile")
+    else:
+        await speak(f"Il est {h} heures {m}")
+
+
+async def handle_repeat(_query: str):
+    last = memory.last_tts
+    if last:
+        await speak(last)
+    else:
+        await speak("Je n'ai rien a repeter")
+
+
+async def handle_cancel(_query: str):
+    await speak("D'accord, j'annule")
+
+
+async def handle_timer(query: str):
+    minutes = extract_timer_minutes(query)
+    if minutes and minutes > 0:
+        await speak(f"Minuteur de {minutes} minutes lance")
+
+        async def _timer_alert():
+            await asyncio.sleep(minutes * 60)
+            await speak(f"Le minuteur de {minutes} minutes est termine!")
+
+        asyncio.create_task(_timer_alert())
+        memory.add("TIMER", str(minutes))
+    else:
+        await speak("Combien de minutes pour le minuteur?")
 
 
 async def handle_weather(_query: str):
@@ -185,12 +292,15 @@ async def screen_on():
 
 
 async def handle_general(text: str):
-    response = await llm.ask(text)
+    context = memory.format_for_llm()
+    response = await llm.ask(text, context=context) if context else await llm.ask(text)
+    memory.add("GENERAL", text, {"response": response})
     await broadcast({"type": "llm_response", "data": response})
     await speak(response)
 
 
 async def speak(text: str):
+    memory.set_tts(text)
     await set_state("SPEAKING")
     await broadcast({"type": "speaking", "data": text})
 
@@ -222,14 +332,23 @@ async def speak(text: str):
 INTENT_HANDLERS = {
     "MUSIC_PLAY": handle_music_play,
     "MUSIC_PAUSE": handle_music_pause,
+    "MUSIC_RESUME": handle_music_resume,
     "MUSIC_NEXT": handle_music_next,
-    "MUSIC_VOLUME_UP": lambda q: handle_music_volume("up", q),
-    "MUSIC_VOLUME_DOWN": lambda q: handle_music_volume("down", q),
+    "MUSIC_PREV": handle_music_prev,
+    "MUSIC_VOLUME_UP": handle_music_volume_up,
+    "MUSIC_VOLUME_DOWN": handle_music_volume_down,
+    "MUSIC_VOLUME_SET": handle_music_volume_set,
+    "MUSIC_WHAT": handle_music_what,
+    "MUSIC_PLAYLIST": handle_music_playlist,
     "YOUTUBE_PLAY": handle_youtube_play,
     "YOUTUBE_STOP": handle_youtube_stop,
     "WEATHER": handle_weather,
     "SLEEP": handle_sleep,
     "WAKE": handle_wake,
+    "TIME": handle_time,
+    "REPEAT": handle_repeat,
+    "CANCEL": handle_cancel,
+    "TIMER": handle_timer,
     "GENERAL": handle_general,
 }
 

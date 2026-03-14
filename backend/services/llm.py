@@ -61,16 +61,20 @@ class LLMHandler:
             logger.error("[LLM] Normalize error: %s", e)
             return raw_query
 
-    async def ask(self, user_message: str) -> str:
+    async def ask(self, user_message: str, context: str = "") -> str:
         if not self._client:
             return "Je suis en mode test, je ne peux pas repondre pour le moment."
+
+        system = SYSTEM_PROMPT
+        if context:
+            system += "\n\n" + context
 
         try:
             response = await self._client.chat.completions.create(
                 model="gpt-4o-mini",
                 max_tokens=200,
                 messages=[
-                    {"role": "system", "content": SYSTEM_PROMPT},
+                    {"role": "system", "content": system},
                     {"role": "user", "content": user_message},
                 ],
             )
