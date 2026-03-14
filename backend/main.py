@@ -106,25 +106,27 @@ async def handle_music_prev(_query: str):
 
 
 async def handle_music_volume_up(_query: str):
-    current_vol = await music.get_volume()
-    new_vol = min(100, current_vol + 15)
-    await music.set_volume(new_vol)
-    await broadcast({"type": "volume", "data": new_vol})
-    memory.add("MUSIC_VOLUME_UP", str(new_vol))
+    ok = await devialet.volume_up()
+    if ok:
+        status = await devialet.get_status()
+        vol = status.get("volume")
+        await broadcast({"type": "volume", "data": vol})
+        memory.add("MUSIC_VOLUME_UP", str(vol))
 
 
 async def handle_music_volume_down(_query: str):
-    current_vol = await music.get_volume()
-    new_vol = max(0, current_vol - 15)
-    await music.set_volume(new_vol)
-    await broadcast({"type": "volume", "data": new_vol})
-    memory.add("MUSIC_VOLUME_DOWN", str(new_vol))
+    ok = await devialet.volume_down()
+    if ok:
+        status = await devialet.get_status()
+        vol = status.get("volume")
+        await broadcast({"type": "volume", "data": vol})
+        memory.add("MUSIC_VOLUME_DOWN", str(vol))
 
 
 async def handle_music_volume_set(query: str):
     val = extract_volume_value(query)
     if val is not None:
-        await music.set_volume(val)
+        await devialet.set_volume(val)
         await broadcast({"type": "volume", "data": val})
         memory.add("MUSIC_VOLUME_SET", str(val))
         await speak(f"Volume a {val} pourcent")
