@@ -225,14 +225,12 @@ class YouTubeController:
         sink_name = _get_raop_sink()
         logger.info("[YOUTUBE] Sink audio: %s, %d stream URLs", sink_name, len(stream_urls))
         env = {**os.environ, "PULSE_SINK": sink_name}
-        vlc_volume = cfg.get("vlc_volume", 256)
         cache_ms = cfg.get("network_cache_ms", 5000)
         vlc_args = [
             "vlc",
             "--fullscreen",
             "--play-and-exit",
             "--aout=pulse",
-            f"--volume={vlc_volume}",
             "--no-video-title-show",
             "--quiet",
             f"--network-caching={cache_ms}",
