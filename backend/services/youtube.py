@@ -30,25 +30,26 @@ def _get_raop_sink() -> str:
             ["pactl", "list", "sinks", "short"],
             capture_output=True, text=True, timeout=5,
         )
-        manual_ipv4 = None
         auto_ipv4 = None
+        manual_ipv4 = None
         any_devialet = None
         for line in result.stdout.strip().split("\n"):
             parts = line.split("\t")
             if len(parts) < 2:
                 continue
             name = parts[1]
-            if "devialet_ipv4" in name:
-                manual_ipv4 = name
-            elif "phantom" in name.lower() and "fe80" not in name:
+            if "phantom" in name.lower() and "fe80" not in name and "devialet_ipv4" not in name:
                 auto_ipv4 = name
+            elif "devialet_ipv4" in name:
+                manual_ipv4 = name
             elif "phantom" in name.lower():
                 any_devialet = name
 
-        if manual_ipv4:
-            return manual_ipv4
+        # Prefer auto-discovered IPv4 (manual config may be stale)
         if auto_ipv4:
             return auto_ipv4
+        if manual_ipv4:
+            return manual_ipv4
         if any_devialet:
             return any_devialet
     except Exception:
@@ -228,14 +229,19 @@ class YouTubeController:
         cache_ms = cfg.get("network_cache_ms", 5000)
 
         # Use mpv (VLC 3.0.23 broken with HTTPS streams on Pi)
+        cache_secs = max(10, cache_ms // 1000)
         player_args = [
             "mpv",
             "--fullscreen",
             "--ao=pulse",
+            "--vo=gpu",
+            "--gpu-context=wayland",
             "--no-terminal",
-            f"--cache-secs={cache_ms // 1000}",
-            "--demuxer-max-bytes=50M",
-            "--hwdec=auto",
+            f"--cache-secs={cache_secs}",
+            f"--demuxer-readahead-secs={cache_secs}",
+            "--demuxer-max-bytes=80M",
+            "--hwdec=no",
+            "--audio-buffer=1",
         ]
         if len(stream_urls) >= 2 and stream_urls[1]:
             player_args.append(f"--audio-file={stream_urls[1]}")
