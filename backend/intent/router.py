@@ -20,10 +20,14 @@ INTENT_KEYWORDS = {
                     "je recherche", "je me souviens plus", "je me rappelle plus", "ça fait", "ça dit",
                     "comment s'appelle", "comment elle s'appelle"],
     "MUSIC_PLAYLIST": ["playlist", "ma playlist", "mes playlists"],
-    "MUSIC_AI_MIX": ["fais moi", "cree moi", "crée moi", "genere", "génère", "ambiance",
-                      "mix de", "selection de", "sélection de", "compile", "propose moi",
-                      "prepare", "prépare", "liste de lecture", "les meilleur", "qui ont marqué",
-                      "top", "classement", "les plus"],
+    "MUSIC_AI_MIX": ["fais moi", "fais-moi", "cree moi", "crée moi", "genere", "génère",
+                      "fabrique", "fabriquer", "compose", "concocte",
+                      "ambiance", "mix de", "selection de", "sélection de",
+                      "compile", "propose moi", "propose-moi",
+                      "prepare", "prépare", "liste de lecture",
+                      "les meilleur", "qui ont marqué", "pour se motiver",
+                      "top", "classement", "les plus",
+                      "playlist de", "playlist pour"],
     # YouTube
     "YOUTUBE_PLAY": ["youtube", "video", "vidéo", "regarde", "montre", "clip", "dessin anime", "dessin animé", "épisode", "episode"],
     "YOUTUBE_STOP": ["ferme", "quitte", "stop video", "stop vidéo"],
@@ -135,8 +139,8 @@ def route(text: str) -> tuple[str, str]:
             best_intent = "MUSIC_FIND"
         elif "MUSIC_FIND" in scores:
             best_intent = "MUSIC_FIND"
-        # AI_MIX beats MUSIC_PLAY — complex requests are AI playlists
-        elif "MUSIC_AI_MIX" in scores and "MUSIC_PLAY" in scores:
+        # AI_MIX beats MUSIC_PLAY and MUSIC_PLAYLIST — complex requests are AI playlists
+        elif "MUSIC_AI_MIX" in scores and ("MUSIC_PLAY" in scores or "MUSIC_PLAYLIST" in scores):
             best_intent = "MUSIC_AI_MIX"
         # YOUTUBE_PLAY beats MUSIC_PLAY when both match
         elif "YOUTUBE_PLAY" in scores and "MUSIC_PLAY" in scores:
