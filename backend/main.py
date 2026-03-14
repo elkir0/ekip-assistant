@@ -16,6 +16,7 @@ from services.spotify import MusicController
 from services.weather import WeatherService
 from services.youtube import YouTubeController
 from services.cameras import CameraService
+from services.devialet import DevialetService
 from services.llm import LLMHandler
 from services.tts import TTSEngine
 from intent.router import route
@@ -33,6 +34,7 @@ music = MusicController()
 weather = WeatherService()
 youtube = YouTubeController()
 cameras = CameraService()
+devialet = DevialetService()
 llm = LLMHandler()
 tts = TTSEngine()
 
@@ -538,6 +540,7 @@ async def lifespan(app: FastAPI):
     # Start Spotify in background — don't block server startup on rate limits
     asyncio.create_task(_start_spotify())
     await cameras.start()
+    await devialet.start()
     await llm.start()
     await tts.start()
     # Connect YouTube ↔ Spotify: pause music when video plays, resume when stops
@@ -710,6 +713,44 @@ async def websocket_endpoint(ws: WebSocket):
             elif msg.get("type") == "weather_refresh":
                 data = await weather.get_current()
                 await ws.send_json({"type": "weather", "data": data})
+            elif msg.get("type") == "devialet_status":
+                status = await devialet.get_status()
+                await ws.send_json({"type": "devialet_status", "data": status})
+            elif msg.get("type") == "devialet_volume":
+                vol = int(msg.get("data", 50))
+                await devialet.set_volume(vol)
+                status = await devialet.get_status()
+                await broadcast({"type": "devialet_status", "data": status})
+            elif msg.get("type") == "devialet_volume_up":
+                await devialet.volume_up()
+                status = await devialet.get_status()
+                await broadcast({"type": "devialet_status", "data": status})
+            elif msg.get("type") == "devialet_volume_down":
+                await devialet.volume_down()
+                status = await devialet.get_status()
+                await broadcast({"type": "devialet_status", "data": status})
+            elif msg.get("type") == "devialet_play":
+                await devialet.play()
+            elif msg.get("type") == "devialet_pause":
+                await devialet.pause()
+            elif msg.get("type") == "devialet_next":
+                await devialet.next_track()
+            elif msg.get("type") == "devialet_prev":
+                await devialet.previous_track()
+            elif msg.get("type") == "devialet_mute":
+                await devialet.mute()
+            elif msg.get("type") == "devialet_unmute":
+                await devialet.unmute()
+            elif msg.get("type") == "devialet_night_mode":
+                on = bool(msg.get("data", False))
+                await devialet.set_night_mode(on)
+                status = await devialet.get_status()
+                await broadcast({"type": "devialet_status", "data": status})
+            elif msg.get("type") == "devialet_eq_preset":
+                preset = msg.get("data", "flat")
+                await devialet.set_equalizer_preset(preset)
+                status = await devialet.get_status()
+                await broadcast({"type": "devialet_status", "data": status})
             elif msg.get("type") == "audio_sinks":
                 sinks = await _get_audio_sinks()
                 await ws.send_json({"type": "audio_sinks", "data": sinks})

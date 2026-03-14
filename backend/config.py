@@ -31,5 +31,8 @@ UNIFI_HOST = os.getenv("UNIFI_HOST", "192.168.1.18")
 UNIFI_USER = os.getenv("UNIFI_USER", "")
 UNIFI_PASS = os.getenv("UNIFI_PASS", "")
 
+# Devialet IP Control
+DEVIALET_IP = os.getenv("DEVIALET_IP", "192.168.1.106")
+
 # Chemins
 FRONTEND_BUILD_DIR = os.path.join(os.path.dirname(__file__), "..", "frontend", "dist")

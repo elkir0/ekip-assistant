@@ -5,13 +5,15 @@
   import Weather from './pages/Weather.svelte';
   import YouTube from './pages/YouTube.svelte';
   import Cameras from './pages/Cameras.svelte';
+  import Devialet from './pages/Devialet.svelte';
   import WaveAnimation from './components/WaveAnimation.svelte';
 
   const pages = [
     { name: 'Musique' },
     { name: 'Meteo' },
     { name: 'YouTube' },
-    { name: 'Cameras' }
+    { name: 'Cameras' },
+    { name: 'Devialet' }
   ];
 
   let touchStartX = 0;
@@ -44,7 +46,7 @@
     swiping = false;
 
     if (Math.abs(touchDeltaX) > 60) {
-      if (touchDeltaX < 0 && $currentPage < 3) {
+      if (touchDeltaX < 0 && $currentPage < 4) {
         currentPage.set($currentPage + 1);
       } else if (touchDeltaX > 0 && $currentPage > 0) {
         currentPage.set($currentPage - 1);
@@ -110,6 +112,7 @@
     <div class="page" class:page-hidden={$currentPage !== 1}><Weather /></div>
     <div class="page" class:page-hidden={$currentPage !== 2}><YouTube /></div>
     <div class="page" class:page-hidden={$currentPage !== 3}><Cameras /></div>
+    <div class="page" class:page-hidden={$currentPage !== 4}><Devialet /></div>
   </div>
 
   <nav class="indicators">

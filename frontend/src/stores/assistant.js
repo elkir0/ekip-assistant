@@ -19,6 +19,7 @@ export const spotifyAuthQr = writable(null);
 export const youtubeError = writable('');
 export const camerasData = writable([]);
 export const fullscreenCam = writable(null);
+export const devialetData = writable(null);
 export const showSettings = writable(false);
 export const audioSinks = writable({ default: '', sinks: [] });
 
@@ -120,6 +121,9 @@ export function connectWS() {
         break;
       case 'cameras_list':
         camerasData.set(msg.data);
+        break;
+      case 'devialet_status':
+        devialetData.set(msg.data);
         break;
     }
   };
