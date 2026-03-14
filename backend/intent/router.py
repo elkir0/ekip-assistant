@@ -13,7 +13,7 @@ INTENT_KEYWORDS = {
     "MUSIC_PREV": ["precedent", "précédent", "precedente", "précédente", "reviens", "avant"],
     "MUSIC_VOLUME_UP": ["plus fort", "monte le son", "augmente", "monte le volume"],
     "MUSIC_VOLUME_DOWN": ["moins fort", "baisse le son", "diminue", "baisse le volume", "baisser le son", "baisser"],
-    "MUSIC_VOLUME_SET": ["volume a", "volume à", "son a", "son à"],
+    "MUSIC_VOLUME_SET": ["volume a", "volume à", "volume au", "son a", "son à", "mets le volume", "mets le son", "volume", "pourcent", "%"],
     "MUSIC_WHAT": ["c'est quoi", "c'est qui", "quel morceau", "quelle chanson", "qui chante", "quel artiste"],
     "MUSIC_PLAYLIST": ["playlist", "ma playlist", "mes playlists"],
     # YouTube
@@ -60,12 +60,28 @@ def extract_query(text: str, intent: str) -> str:
     return cleaned
 
 
+_FRENCH_NUMBERS = {
+    "zero": 0, "cinq": 5, "dix": 10, "quinze": 15, "vingt": 20,
+    "vingt-cinq": 25, "trente": 30, "trente-cinq": 35, "quarante": 40,
+    "quarante-cinq": 45, "cinquante": 50, "cinquante-cinq": 55,
+    "soixante": 60, "soixante-cinq": 65, "soixante-dix": 70,
+    "soixante-quinze": 75, "quatre-vingt": 80, "quatre-vingts": 80,
+    "quatre-vingt-cinq": 85, "quatre-vingt-dix": 90, "cent": 100,
+}
+
+
 def extract_volume_value(text: str) -> int | None:
-    """Extract a volume percentage from text like 'volume a 30%'."""
+    """Extract a volume percentage from text like 'volume a 30%' or 'volume a soixante'."""
+    # Try digits first
     m = re.search(r'(\d+)\s*%?', text)
     if m:
         val = int(m.group(1))
         if 0 <= val <= 100:
+            return val
+    # Try French number words
+    lower = text.lower()
+    for word, val in sorted(_FRENCH_NUMBERS.items(), key=lambda x: -len(x[0])):
+        if word in lower:
             return val
     return None
 
@@ -94,6 +110,12 @@ def route(text: str) -> tuple[str, str]:
 
     if not scores:
         return "GENERAL", text
+
+    # Special case: if there's a number + volume keywords → VOLUME_SET takes over
+    if extract_volume_value(lower) is not None and any(k in lower for k in ["volume", "son", "pourcent", "%"]):
+        query = extract_query(text, "MUSIC_VOLUME_SET")
+        logger.info("[INTENT] '%s' -> MUSIC_VOLUME_SET (query='%s')", text[:50], query)
+        return "MUSIC_VOLUME_SET", text  # pass full text for number extraction
 
     # If a priority intent (volume, next, pause) matches, prefer it over content intents
     priority_matches = {k: v for k, v in scores.items() if k in PRIORITY_INTENTS}
