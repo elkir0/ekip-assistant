@@ -30,7 +30,7 @@
       if (track.playing) {
         sendWS({ type: 'music_progress' });
       }
-    }, 5000);
+    }, 10000);
   });
   onDestroy(() => clearInterval(progressInterval));
 
@@ -104,10 +104,8 @@
     musicSearchResults.set([]);
   }
 
-  // Refresh queue when track changes
-  $: if (track.playing && track.title !== 'En attente...') {
-    refreshQueue();
-  }
+  // Queue is refreshed server-side after play/next/playlist commands
+  // No client-side reactive polling needed
 
   let retrying = false;
   function retrySpotify() {
