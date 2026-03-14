@@ -15,6 +15,7 @@ INTENT_KEYWORDS = {
     "MUSIC_VOLUME_DOWN": ["moins fort", "baisse le son", "diminue", "baisse le volume", "baisser le son", "baisser"],
     "MUSIC_VOLUME_SET": ["volume a", "volume à", "volume au", "son a", "son à", "mets le volume", "mets le son", "volume", "pourcent", "%"],
     "MUSIC_WHAT": ["c'est quoi", "c'est qui", "quel morceau", "quelle chanson", "qui chante", "quel artiste"],
+    "MUSIC_FIND": ["trouve moi", "trouve-moi", "cherche moi", "cherche-moi", "la chanson qui dit", "la musique qui dit", "qui fait", "le morceau qui", "le son qui"],
     "MUSIC_PLAYLIST": ["playlist", "ma playlist", "mes playlists"],
     "MUSIC_AI_MIX": ["fais moi", "cree moi", "crée moi", "genere", "génère", "ambiance",
                       "mix de", "selection de", "sélection de", "compile", "propose moi",
@@ -126,8 +127,11 @@ def route(text: str) -> tuple[str, str]:
     if priority_matches:
         best_intent = max(priority_matches, key=priority_matches.get)
     else:
+        # MUSIC_FIND beats MUSIC_PLAY — "trouve moi la chanson qui..."
+        if "MUSIC_FIND" in scores:
+            best_intent = "MUSIC_FIND"
         # AI_MIX beats MUSIC_PLAY — complex requests are AI playlists
-        if "MUSIC_AI_MIX" in scores and "MUSIC_PLAY" in scores:
+        elif "MUSIC_AI_MIX" in scores and "MUSIC_PLAY" in scores:
             best_intent = "MUSIC_AI_MIX"
         # YOUTUBE_PLAY beats MUSIC_PLAY when both match
         elif "YOUTUBE_PLAY" in scores and "MUSIC_PLAY" in scores:

@@ -61,6 +61,33 @@ class LLMHandler:
             logger.error("[LLM] Normalize error: %s", e)
             return raw_query
 
+    async def identify_song(self, lyrics_hint: str) -> str | None:
+        """Identify a song from partial lyrics or description."""
+        if not self._client:
+            return None
+        try:
+            response = await self._client.chat.completions.create(
+                model="gpt-4o-mini",
+                max_tokens=50,
+                temperature=0,
+                messages=[
+                    {"role": "system", "content": (
+                        "L'utilisateur decrit une chanson par ses paroles ou une description. "
+                        "Identifie la chanson et reponds UNIQUEMENT avec 'Artiste - Titre'. "
+                        "Si tu ne sais pas, reponds 'inconnu'. Rien d'autre."
+                    )},
+                    {"role": "user", "content": lyrics_hint},
+                ],
+            )
+            result = response.choices[0].message.content.strip().strip('"\'')
+            if result.lower() == "inconnu":
+                return None
+            logger.info("[LLM] Song identified: '%s' -> '%s'", lyrics_hint[:40], result)
+            return result
+        except Exception as e:
+            logger.error("[LLM] Identify song error: %s", e)
+            return None
+
     async def generate_playlist(self, prompt: str) -> list[str]:
         """Ask the LLM to generate a playlist of song titles for a given mood/theme."""
         if not self._client:

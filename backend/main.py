@@ -164,6 +164,23 @@ async def handle_music_playlist(query: str):
         await speak("Dis-moi quelle playlist tu veux")
 
 
+async def handle_music_find(query: str):
+    """Find a song by lyrics or description using LLM, then play it."""
+    await speak("Je cherche cette chanson...")
+    identified = await llm.identify_song(query)
+    if identified:
+        logger.info("[PIPELINE] Chanson identifiee: %s", identified)
+        result = await music.search_and_play(identified)
+        await broadcast({"type": "music", "data": result})
+        memory.add("MUSIC_FIND", query, result)
+        if result.get("playing"):
+            await speak(f"C'est {result['title']} de {result['artist']}")
+        else:
+            await speak(f"J'ai identifie {identified} mais je ne la trouve pas sur Spotify")
+    else:
+        await speak("Desole, je n'ai pas reussi a identifier cette chanson")
+
+
 async def handle_ai_mix(query: str):
     """Generate a playlist with AI and play it on Spotify."""
     await speak(f"Je prepare une selection pour toi...")
@@ -388,6 +405,7 @@ INTENT_HANDLERS = {
     "MUSIC_VOLUME_SET": handle_music_volume_set,
     "MUSIC_WHAT": handle_music_what,
     "MUSIC_PLAYLIST": handle_music_playlist,
+    "MUSIC_FIND": handle_music_find,
     "MUSIC_AI_MIX": handle_ai_mix,
     "YOUTUBE_PLAY": handle_youtube_play,
     "YOUTUBE_STOP": handle_youtube_stop,
