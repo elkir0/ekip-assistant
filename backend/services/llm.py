@@ -11,10 +11,33 @@ except ImportError:
     HAS_OPENAI = False
     logger.warning("[LLM] openai non disponible")
 
-SYSTEM_PROMPT = """Tu es PI-Board, un assistant vocal intelligent installe sur un Raspberry Pi en Guadeloupe.
+try:
+    from admin.config_manager import config as admin_config
+except ImportError:
+    admin_config = None
+
+DEFAULT_SYSTEM_PROMPT = """Tu es PI-Board, un assistant vocal intelligent installe sur un Raspberry Pi en Guadeloupe.
 Tu reponds de maniere concise et naturelle en francais.
 Tes reponses sont courtes (1-2 phrases max) car elles seront lues a voix haute.
 Tu es sympathique et utile. Tu tutoies l'utilisateur."""
+
+
+def _get_system_prompt() -> str:
+    if admin_config:
+        return admin_config.get("llm", "system_prompt", DEFAULT_SYSTEM_PROMPT)
+    return DEFAULT_SYSTEM_PROMPT
+
+
+def _get_llm_model() -> str:
+    if admin_config:
+        return admin_config.get("llm", "model", "gpt-4o-mini")
+    return "gpt-4o-mini"
+
+
+def _get_max_tokens() -> int:
+    if admin_config:
+        return admin_config.get("llm", "max_tokens", 200)
+    return 200
 
 
 class LLMHandler:
@@ -194,14 +217,14 @@ class LLMHandler:
         if not self._client:
             return "Je suis en mode test, je ne peux pas repondre pour le moment."
 
-        system = SYSTEM_PROMPT
+        system = _get_system_prompt()
         if context:
             system += "\n\n" + context
 
         try:
             response = await self._client.chat.completions.create(
-                model="gpt-4o-mini",
-                max_tokens=200,
+                model=_get_llm_model(),
+                max_tokens=_get_max_tokens(),
                 messages=[
                     {"role": "system", "content": system},
                     {"role": "user", "content": user_message},
