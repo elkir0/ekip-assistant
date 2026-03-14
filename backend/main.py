@@ -712,7 +712,8 @@ async def websocket_endpoint(ws: WebSocket):
     try:
         spotify_status = music.status
         await ws.send_json({"type": "spotify_status", "data": spotify_status})
-        vol = await asyncio.wait_for(music.get_volume(), timeout=3)
+        dev_status = await asyncio.wait_for(devialet.get_status(), timeout=3)
+        vol = dev_status.get("volume") or 50
         await ws.send_json({"type": "volume", "data": vol})
         current = await asyncio.wait_for(music.get_current(), timeout=3)
         if current.get("playing"):
@@ -754,7 +755,7 @@ async def websocket_endpoint(ws: WebSocket):
             elif msg.get("type") == "music_volume":
                 global volume_manual_override
                 vol = int(msg.get("data", 50))
-                await music.set_volume(vol)
+                await devialet.set_volume(vol)
                 await broadcast({"type": "volume", "data": vol})
                 volume_manual_override = True
             elif msg.get("type") == "music_search":
@@ -794,8 +795,8 @@ async def websocket_endpoint(ws: WebSocket):
                 status = music.status
                 await broadcast({"type": "spotify_status", "data": status})
                 if status == "ok":
-                    vol = await music.get_volume()
-                    await broadcast({"type": "volume", "data": vol})
+                    dev_s = await devialet.get_status()
+                    await broadcast({"type": "volume", "data": dev_s.get("volume") or 50})
             elif msg.get("type") == "youtube_search":
                 query = msg.get("data", "")
                 if query and len(query) >= 2:
