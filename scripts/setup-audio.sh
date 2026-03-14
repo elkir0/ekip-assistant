@@ -1,16 +1,8 @@
 #!/bin/bash
-# Wait for Devialet RAOP sink to appear, prefer auto-discovered IPv4
+# Wait for Devialet RAOP sink to appear — use whichever Phantom sink works
 for i in $(seq 1 30); do
-    # Prefer auto-discovered IPv4 Phantom sink (most reliable)
-    SINK=$(pactl list sinks short 2>/dev/null | grep -i phantom | grep -v "fe80" | grep -v "devialet_ipv4" | head -1 | awk '{print $2}')
-    # Fallback to manual IPv4
-    if [ -z "$SINK" ]; then
-        SINK=$(pactl list sinks short 2>/dev/null | grep "devialet_ipv4" | awk '{print $2}')
-    fi
-    # Fallback to any Phantom
-    if [ -z "$SINK" ]; then
-        SINK=$(pactl list sinks short 2>/dev/null | grep -i phantom | head -1 | awk '{print $2}')
-    fi
+    # Any Phantom sink (IPv4 or IPv6)
+    SINK=$(pactl list sinks short 2>/dev/null | grep -i phantom | head -1 | awk '{print $2}')
     if [ -n "$SINK" ]; then
         pactl set-default-sink "$SINK"
         pactl set-sink-volume "$SINK" 50%
