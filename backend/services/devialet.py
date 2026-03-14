@@ -67,12 +67,20 @@ class DevialetService:
     # ------------------------------------------------------------------
 
     async def start(self) -> bool:
-        """Test connectivity to the Devialet. Returns True if reachable."""
+        """Test connectivity and cache current volume."""
         info = await self._get("/devices/current")
         if info:
             name = info.get("deviceName", "?")
             model = info.get("model", "?")
             logger.info(_prefix(f"Connected — {model} '{name}' at {self.ip}"))
+            # Cache current Devialet volume so ensure_volume works from start
+            vol_data = await self._get("/systems/current/sources/current/soundControl/volume")
+            if vol_data and vol_data.get("volume") is not None:
+                self._last_volume = vol_data["volume"]
+                logger.info(_prefix(f"Volume initial: {self._last_volume}%"))
+            else:
+                self._last_volume = 40  # Safe default
+                logger.info(_prefix("Pas de source active, volume par defaut: 40%"))
             return True
         logger.error(_prefix(f"Cannot reach Devialet at {self.ip}"))
         return False
@@ -133,10 +141,20 @@ class DevialetService:
     async def ensure_volume(self):
         """Re-apply last known volume (call after track change to prevent AirPlay reset)."""
         if self._last_volume is not None:
+            logger.info(_prefix(f"ensure_volume: {self._last_volume}%"))
             await self._post(
                 "/systems/current/sources/current/soundControl/volume",
                 {"volume": self._last_volume},
             )
+            # Also cap PipeWire so AirPlay doesn't override
+            try:
+                import subprocess
+                subprocess.run(
+                    ["pactl", "set-sink-volume", "@DEFAULT_SINK@", f"{self._last_volume}%"],
+                    timeout=2, capture_output=True,
+                )
+            except Exception:
+                pass
 
     async def volume_up(self) -> bool:
         return await self._post(
