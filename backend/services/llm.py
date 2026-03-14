@@ -67,14 +67,18 @@ class LLMHandler:
             return None
         try:
             response = await self._client.chat.completions.create(
-                model="gpt-4o-mini",
-                max_tokens=50,
+                model="gpt-4o",
+                max_tokens=80,
                 temperature=0,
                 messages=[
                     {"role": "system", "content": (
                         "L'utilisateur decrit une chanson par ses paroles ou une description. "
-                        "Identifie la chanson et reponds UNIQUEMENT avec 'Artiste - Titre'. "
-                        "Si tu ne sais pas, reponds 'inconnu'. Rien d'autre."
+                        "Identifie la chanson. Reflechis bien, prends en compte le genre musical mentionne. "
+                        "Si l'utilisateur dit que c'est de l'electronique, du rap, etc., cherche dans ce genre. "
+                        "Reponds avec: Artiste - Titre\n"
+                        "Si tu hesites entre plusieurs, donne la plus probable.\n"
+                        "Si tu ne sais vraiment pas, reponds 'inconnu'.\n"
+                        "Rien d'autre que 'Artiste - Titre' ou 'inconnu'."
                     )},
                     {"role": "user", "content": lyrics_hint},
                 ],
