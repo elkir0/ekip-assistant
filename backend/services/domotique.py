@@ -18,11 +18,12 @@ def _prefix(msg: str) -> str:
 class DomotiqueService:
     """Async controller for home automation devices."""
 
+    # Identify devices by MAC/ID (survives IP changes)
     DEVICES = {
-        "volet_gauche": {"ip": "192.168.1.52", "type": "shelly_roller", "name": "Volet Gauche"},
-        "volet_milieu": {"ip": "192.168.1.20", "type": "shelly_roller", "name": "Volet Milieu"},
-        "portail": {"ip": "192.168.1.55", "type": "shelly_relay_g3", "name": "Portail"},
-        "guinguette": {"ip": "192.168.1.102", "type": "kasa_plug", "name": "Guinguette"},
+        "volet_gauche": {"mac": "E8DB84A24228", "type": "shelly_roller", "name": "Volet Gauche", "ip": None},
+        "volet_milieu": {"mac": "3C6105E568E0", "type": "shelly_roller", "name": "Volet Milieu", "ip": None},
+        "portail": {"id": "shelly1minig3-5432045e824c", "type": "shelly_relay_g3", "name": "Portail", "ip": None},
+        "guinguette": {"type": "kasa_plug", "name": "Guinguette", "ip": None},
     }
 
     def __init__(self):
@@ -84,26 +85,56 @@ class DomotiqueService:
     # ------------------------------------------------------------------
 
     async def start(self):
-        """Test connectivity to all devices at startup."""
+        """Discover device IPs by scanning the network, then test connectivity."""
+        await self._discover_devices()
         for did, dev in self.DEVICES.items():
-            ip = dev["ip"]
-            dtype = dev["type"]
+            ip = dev.get("ip")
+            status = "OK" if ip else "NOT FOUND"
+            logger.info(_prefix(f"{dev['name']} ({ip or '?'}) — {status}"))
+
+    async def _discover_devices(self):
+        """Scan LAN to find Shelly and Kasa devices by MAC/ID."""
+        loop = self._get_loop()
+
+        # Scan for Shelly devices (Gen1 + Gen3)
+        async def scan_ip(ip):
             try:
-                if dtype == "shelly_roller":
-                    r = await self._http_get(f"http://{ip}/status")
-                    ok = r is not None
-                elif dtype == "shelly_relay_g3":
-                    r = await self._http_get(f"http://{ip}/rpc/Shelly.GetDeviceInfo")
-                    ok = r is not None
-                elif dtype == "kasa_plug":
-                    plug = await self._get_kasa()
-                    ok = plug is not None
-                else:
-                    ok = False
-                status = "OK" if ok else "UNREACHABLE"
-                logger.info(_prefix(f"{dev['name']} ({ip}) — {status}"))
-            except Exception as exc:
-                logger.warning(_prefix(f"{dev['name']} ({ip}) — error: {exc}"))
+                resp = await loop.run_in_executor(
+                    None, functools.partial(requests.get, f"http://192.168.1.{ip}/shelly", timeout=0.5)
+                )
+                if resp.status_code == 200:
+                    data = resp.json()
+                    return ip, data.get("mac", ""), data.get("id", "")
+            except Exception:
+                pass
+            return None
+
+        # Scan 1-254 in parallel batches
+        tasks = [scan_ip(ip) for ip in range(1, 255)]
+        results = await asyncio.gather(*tasks)
+
+        for result in results:
+            if not result:
+                continue
+            ip_num, mac, dev_id = result
+            full_ip = f"192.168.1.{ip_num}"
+            for did, dev in self.DEVICES.items():
+                if dev.get("mac") and mac.upper() == dev["mac"].upper():
+                    dev["ip"] = full_ip
+                elif dev.get("id") and dev_id == dev["id"]:
+                    dev["ip"] = full_ip
+
+        # Discover Kasa via python-kasa
+        try:
+            from kasa import Discover
+            found = await Discover.discover(timeout=5)
+            for addr, device in found.items():
+                await device.update()
+                if "guinguette" in (device.alias or "").lower() or "hs100" in (device.model or "").lower():
+                    self.DEVICES["guinguette"]["ip"] = addr
+                    logger.info(_prefix(f"Kasa found: {device.alias} @ {addr}"))
+        except Exception as e:
+            logger.warning(_prefix(f"Kasa discover failed: {e}"))
 
     # ------------------------------------------------------------------
     # Status
