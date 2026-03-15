@@ -93,26 +93,31 @@ class DomotiqueService:
             logger.info(_prefix(f"{dev['name']} ({ip or '?'}) — {status}"))
 
     async def _discover_devices(self):
-        """Scan LAN to find Shelly and Kasa devices by MAC/ID."""
+        """Find Shelly and Kasa devices — try known IPs first, then light scan."""
         loop = self._get_loop()
 
-        # Scan for Shelly devices (Gen1 + Gen3)
-        async def scan_ip(ip):
+        # Known IPs (last seen) — try these first (fast)
+        known_ips = [20, 52, 55, 42, 100, 102, 103, 106]
+
+        async def probe_shelly(ip_num):
             try:
                 resp = await loop.run_in_executor(
-                    None, functools.partial(requests.get, f"http://192.168.1.{ip}/shelly", timeout=0.5)
+                    None, functools.partial(
+                        requests.get, f"http://192.168.1.{ip_num}/shelly", timeout=1
+                    )
                 )
                 if resp.status_code == 200:
                     data = resp.json()
-                    return ip, data.get("mac", ""), data.get("id", "")
+                    return ip_num, data.get("mac", ""), data.get("id", "")
             except Exception:
                 pass
             return None
 
-        # Scan 1-254 in parallel batches
-        tasks = [scan_ip(ip) for ip in range(1, 255)]
+        # Probe known IPs first
+        tasks = [probe_shelly(ip) for ip in known_ips]
         results = await asyncio.gather(*tasks)
 
+        found_count = 0
         for result in results:
             if not result:
                 continue
@@ -121,20 +126,43 @@ class DomotiqueService:
             for did, dev in self.DEVICES.items():
                 if dev.get("mac") and mac.upper() == dev["mac"].upper():
                     dev["ip"] = full_ip
+                    found_count += 1
                 elif dev.get("id") and dev_id == dev["id"]:
                     dev["ip"] = full_ip
+                    found_count += 1
+
+        # If not all Shelly found, scan remaining IPs (batches of 20)
+        shelly_needed = sum(1 for d in self.DEVICES.values() if d["type"].startswith("shelly") and not d.get("ip"))
+        if shelly_needed > 0:
+            remaining = [ip for ip in range(1, 255) if ip not in known_ips]
+            for batch_start in range(0, len(remaining), 20):
+                batch = remaining[batch_start:batch_start + 20]
+                batch_results = await asyncio.gather(*[probe_shelly(ip) for ip in batch])
+                for result in batch_results:
+                    if not result:
+                        continue
+                    ip_num, mac, dev_id = result
+                    full_ip = f"192.168.1.{ip_num}"
+                    for did, dev in self.DEVICES.items():
+                        if dev.get("mac") and mac.upper() == dev["mac"].upper():
+                            dev["ip"] = full_ip
+                        elif dev.get("id") and dev_id == dev["id"]:
+                            dev["ip"] = full_ip
+                # Stop scanning if all found
+                if all(d.get("ip") for d in self.DEVICES.values() if d["type"].startswith("shelly")):
+                    break
 
         # Discover Kasa via python-kasa
         try:
             from kasa import Discover
-            found = await Discover.discover(timeout=5)
+            found = await Discover.discover(timeout=3)
             for addr, device in found.items():
                 await device.update()
                 if "guinguette" in (device.alias or "").lower() or "hs100" in (device.model or "").lower():
                     self.DEVICES["guinguette"]["ip"] = addr
-                    logger.info(_prefix(f"Kasa found: {device.alias} @ {addr}"))
+                    logger.info(_prefix(f"Kasa: {device.alias} @ {addr}"))
         except Exception as e:
-            logger.warning(_prefix(f"Kasa discover failed: {e}"))
+            logger.warning(_prefix(f"Kasa discover: {e}"))
 
     # ------------------------------------------------------------------
     # Status
