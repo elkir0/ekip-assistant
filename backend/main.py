@@ -481,7 +481,11 @@ async def on_transcript(text: str, is_final: bool):
         # Don't run handler here (recv_loop gets cancelled by send_audio)
         # Instead, store it and run after send_audio completes
         # Pass active context so "stop" routes correctly (youtube vs music)
-        active_ctx = "youtube" if youtube.is_playing() else memory.domain
+        try:
+            is_yt = youtube.is_playing()
+        except Exception:
+            is_yt = False
+        active_ctx = "youtube" if is_yt else memory.domain
         intent, query = route(text, active_context=active_ctx)
         await broadcast({"type": "intent", "data": {"intent": intent, "query": query}})
         _pending_handler = (intent, query)
