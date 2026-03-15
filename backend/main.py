@@ -255,6 +255,33 @@ async def handle_cancel(_query: str):
     await speak("D'accord, j'annule")
 
 
+async def handle_greeting(_query: str):
+    from datetime import datetime
+    h = datetime.now().hour
+    if h < 12:
+        await speak("Bonjour! Comment je peux t'aider?")
+    elif h < 18:
+        await speak("Salut! Qu'est-ce que je peux faire pour toi?")
+    else:
+        await speak("Bonsoir! Je t'ecoute")
+
+
+async def handle_thanks(_query: str):
+    import random
+    responses = ["De rien!", "Avec plaisir!", "A ton service!", "Pas de souci!"]
+    await speak(random.choice(responses))
+
+
+async def handle_mute(_query: str):
+    await devialet.mute()
+    memory.add("MUSIC_MUTE", "")
+
+
+async def handle_unmute(_query: str):
+    await devialet.unmute()
+    memory.add("MUSIC_UNMUTE", "")
+
+
 async def handle_timer(query: str):
     minutes = extract_timer_minutes(query)
     if minutes and minutes > 0:
@@ -401,6 +428,10 @@ INTENT_HANDLERS = {
     "REPEAT": handle_repeat,
     "CANCEL": handle_cancel,
     "TIMER": handle_timer,
+    "GREETING": handle_greeting,
+    "THANKS": handle_thanks,
+    "MUSIC_MUTE": handle_mute,
+    "MUSIC_UNMUTE": handle_unmute,
     "GENERAL": handle_general,
 }
 
@@ -417,7 +448,9 @@ async def on_transcript(text: str, is_final: bool):
         logger.info("[PIPELINE] Transcription: %s", text)
         # Don't run handler here (recv_loop gets cancelled by send_audio)
         # Instead, store it and run after send_audio completes
-        intent, query = route(text)
+        # Pass active context so "stop" routes correctly (youtube vs music)
+        active_ctx = "youtube" if youtube.is_playing() else memory.domain
+        intent, query = route(text, active_context=active_ctx)
         await broadcast({"type": "intent", "data": {"intent": intent, "query": query}})
         _pending_handler = (intent, query)
 

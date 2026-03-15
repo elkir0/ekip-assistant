@@ -5,16 +5,28 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 INTENT_KEYWORDS = {
-    # Music
+    # Music playback
     "MUSIC_PLAY": ["mets", "joue", "lance", "musique", "ecouter", "écouter"],
-    "MUSIC_PAUSE": ["pause", "stop", "arrete", "arrête"],
-    "MUSIC_RESUME": ["reprends", "continue", "relance"],
-    "MUSIC_NEXT": ["suivant", "suivante", "passe", "skip", "prochaine", "change"],
-    "MUSIC_PREV": ["precedent", "précédent", "precedente", "précédente", "reviens", "avant"],
-    "MUSIC_VOLUME_UP": ["plus fort", "monte le son", "augmente", "monte le volume"],
-    "MUSIC_VOLUME_DOWN": ["moins fort", "baisse le son", "diminue", "baisse le volume", "baisser le son", "baisser"],
-    "MUSIC_VOLUME_SET": ["volume a", "volume à", "volume au", "son a", "son à", "mets le volume", "mets le son", "volume", "pourcent", "%"],
-    "MUSIC_WHAT": ["c'est quoi", "c'est qui", "quel morceau", "quelle chanson", "qui chante", "quel artiste"],
+    "MUSIC_PAUSE": ["pause", "stop", "arrete", "arrête", "stoppe", "tais-toi", "tais toi",
+                     "chut", "silence", "la ferme", "suffit", "ca suffit", "ça suffit"],
+    "MUSIC_RESUME": ["reprends", "continue", "relance", "remets", "remet", "encore", "repart"],
+    "MUSIC_NEXT": ["suivant", "suivante", "passe", "skip", "prochaine", "change",
+                    "autre chose", "j'aime pas", "c'est nul", "pas ca", "pas ça"],
+    "MUSIC_PREV": ["precedent", "précédent", "precedente", "précédente", "reviens",
+                    "avant", "d'avant", "la derniere", "la dernière"],
+    # Volume
+    "MUSIC_VOLUME_UP": ["plus fort", "monte le son", "augmente", "monte le volume",
+                         "plus haut", "plus de son", "monte"],
+    "MUSIC_VOLUME_DOWN": ["moins fort", "baisse le son", "diminue", "baisse le volume",
+                           "baisser le son", "baisser", "plus bas", "plus doucement",
+                           "plus doux", "doucement", "trop fort"],
+    "MUSIC_VOLUME_SET": ["volume a", "volume à", "volume au", "son a", "son à",
+                          "mets le volume", "mets le son", "pourcent", "%"],
+    "MUSIC_MUTE": ["coupe le son", "mute", "muet", "couper le son"],
+    "MUSIC_UNMUTE": ["remet le son", "remets le son", "unmute", "du son"],
+    # Music info / search
+    "MUSIC_WHAT": ["c'est quoi", "c'est qui", "quel morceau", "quelle chanson",
+                    "qui chante", "quel artiste", "quel titre", "c'est quel"],
     "MUSIC_FIND": ["trouve moi", "trouve-moi", "cherche moi", "cherche-moi",
                     "la chanson qui dit", "la musique qui dit", "qui fait", "le morceau qui", "le son qui",
                     "je recherche", "je me souviens plus", "je me rappelle plus", "ça fait", "ça dit",
@@ -29,25 +41,39 @@ INTENT_KEYWORDS = {
                       "top", "classement", "les plus",
                       "playlist de", "playlist pour"],
     # YouTube
-    "YOUTUBE_PLAY": ["youtube", "video", "vidéo", "regarde", "montre", "clip", "dessin anime", "dessin animé", "épisode", "episode"],
-    "YOUTUBE_STOP": ["ferme", "quitte", "stop video", "stop vidéo"],
+    "YOUTUBE_PLAY": ["youtube", "video", "vidéo", "regarde", "montre", "clip",
+                      "dessin anime", "dessin animé", "épisode", "episode"],
+    "YOUTUBE_STOP": ["ferme la video", "ferme la vidéo", "quitte", "stop video",
+                      "stop vidéo", "arrete la video", "arrête la vidéo"],
     # Weather
-    "WEATHER": ["meteo", "météo", "temps qu'il fait", "temperature", "température", "pluie", "soleil", "temps dehors"],
+    "WEATHER": ["meteo", "météo", "temps qu'il fait", "temperature", "température",
+                 "pluie", "soleil", "temps dehors", "quel temps", "fait il beau",
+                 "fait-il beau", "pleut", "il pleut"],
     # System
-    "SLEEP": ["dodo", "dort", "dors", "eteins", "éteins", "bonne nuit", "nuit"],
-    "WAKE": ["reveille", "réveille", "allume", "debout", "leve", "lève"],
+    "SLEEP": ["dodo", "dort", "dors", "eteins", "éteins", "bonne nuit", "nuit",
+              "au revoir", "a demain", "à demain"],
+    "WAKE": ["reveille", "réveille", "allume", "debout", "leve", "lève", "bonjour"],
     "TIME": ["heure", "quelle heure"],
     "REPEAT": ["repete", "répète", "redis", "repeter", "répéter", "redit"],
     "CANCEL": ["annule", "non merci", "rien", "laisse tomber", "oublie"],
     "TIMER": ["minuteur", "timer", "chrono", "rappelle moi dans", "dans minutes"],
+    # Social
+    "GREETING": ["bonjour", "salut", "coucou", "hello", "hey"],
+    "THANKS": ["merci", "super", "genial", "génial", "parfait", "cool", "top"],
 }
 
 # Control intents have priority over content intents when both match
 PRIORITY_INTENTS = {
     "MUSIC_VOLUME_DOWN", "MUSIC_VOLUME_UP", "MUSIC_VOLUME_SET",
+    "MUSIC_MUTE", "MUSIC_UNMUTE",
     "MUSIC_NEXT", "MUSIC_PREV", "MUSIC_PAUSE", "MUSIC_RESUME",
     "MUSIC_WHAT", "YOUTUBE_STOP", "CANCEL", "REPEAT", "TIME",
+    "GREETING", "THANKS",
 }
+
+# Keywords that should NEVER trigger MUSIC_PLAY (they have "mets" or "musique" but mean something else)
+ANTI_PLAY_WORDS = ["plus fort", "moins fort", "monte", "baisse", "volume", "mets le son",
+                    "mets le volume", "mets plus fort"]
 
 
 def extract_query(text: str, intent: str) -> str:
@@ -84,13 +110,11 @@ _FRENCH_NUMBERS = {
 
 def extract_volume_value(text: str) -> int | None:
     """Extract a volume percentage from text like 'volume a 30%' or 'volume a soixante'."""
-    # Try digits first
     m = re.search(r'(\d+)\s*%?', text)
     if m:
         val = int(m.group(1))
         if 0 <= val <= 100:
             return val
-    # Try French number words
     lower = text.lower()
     for word, val in sorted(_FRENCH_NUMBERS.items(), key=lambda x: -len(x[0])):
         if word in lower:
@@ -106,8 +130,12 @@ def extract_timer_minutes(text: str) -> int | None:
     return None
 
 
-def route(text: str) -> tuple[str, str]:
+def route(text: str, active_context: str | None = None) -> tuple[str, str]:
     """Route a transcript to an intent.
+
+    Args:
+        text: The transcribed text
+        active_context: Current active domain (music/youtube/None) for contextual routing
 
     Returns (intent, query) tuple.
     """
@@ -123,31 +151,50 @@ def route(text: str) -> tuple[str, str]:
     if not scores:
         return "GENERAL", text
 
-    # Special case: if there's a number + volume keywords → VOLUME_SET takes over
-    if extract_volume_value(lower) is not None and any(k in lower for k in ["volume", "son", "pourcent", "%"]):
-        query = extract_query(text, "MUSIC_VOLUME_SET")
-        logger.info("[INTENT] '%s' -> MUSIC_VOLUME_SET (query='%s')", text[:50], query)
-        return "MUSIC_VOLUME_SET", text  # pass full text for number extraction
+    # --- Anti-confusion rules ---
 
-    # If a priority intent (volume, next, pause) matches, prefer it over content intents
+    # "mets plus fort" → VOLUME_UP, not MUSIC_PLAY
+    if "MUSIC_PLAY" in scores and any(w in lower for w in ANTI_PLAY_WORDS):
+        del scores["MUSIC_PLAY"]
+
+    # "volume" alone without a number → could be VOLUME_UP context, don't match VOLUME_SET
+    if "MUSIC_VOLUME_SET" in scores and extract_volume_value(lower) is None:
+        del scores["MUSIC_VOLUME_SET"]
+
+    if not scores:
+        return "GENERAL", text
+
+    # --- Special cases ---
+
+    # Number + volume keyword → VOLUME_SET
+    if extract_volume_value(lower) is not None and any(k in lower for k in ["volume", "son", "pourcent", "%"]):
+        logger.info("[INTENT] '%s' -> MUSIC_VOLUME_SET", text[:50])
+        return "MUSIC_VOLUME_SET", text
+
+    # "stop" when YouTube is playing → YOUTUBE_STOP instead of MUSIC_PAUSE
+    if "MUSIC_PAUSE" in scores and active_context == "youtube":
+        logger.info("[INTENT] '%s' -> YOUTUBE_STOP (context=youtube)", text[:50])
+        return "YOUTUBE_STOP", text
+
+    # --- Priority-based routing ---
+
+    # Priority intents (volume, next, pause) beat content intents
     priority_matches = {k: v for k, v in scores.items() if k in PRIORITY_INTENTS}
     if priority_matches:
         best_intent = max(priority_matches, key=priority_matches.get)
     else:
-        # MUSIC_FIND beats everything — searching for a specific song
-        if "MUSIC_FIND" in scores and ("MUSIC_PLAY" in scores or "MUSIC_AI_MIX" in scores or len(scores) > 1):
+        # MUSIC_FIND beats everything
+        if "MUSIC_FIND" in scores:
             best_intent = "MUSIC_FIND"
-        elif "MUSIC_FIND" in scores:
-            best_intent = "MUSIC_FIND"
-        # AI_MIX beats MUSIC_PLAY and MUSIC_PLAYLIST — complex requests are AI playlists
+        # AI_MIX beats MUSIC_PLAY and MUSIC_PLAYLIST
         elif "MUSIC_AI_MIX" in scores and ("MUSIC_PLAY" in scores or "MUSIC_PLAYLIST" in scores):
             best_intent = "MUSIC_AI_MIX"
-        # YOUTUBE_PLAY beats MUSIC_PLAY when both match
+        # YOUTUBE_PLAY beats MUSIC_PLAY
         elif "YOUTUBE_PLAY" in scores and "MUSIC_PLAY" in scores:
             best_intent = "YOUTUBE_PLAY"
         else:
             best_intent = max(scores, key=scores.get)
-    query = extract_query(text, best_intent)
 
+    query = extract_query(text, best_intent)
     logger.info("[INTENT] '%s' -> %s (query='%s')", text[:50], best_intent, query)
     return best_intent, query
