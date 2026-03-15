@@ -127,14 +127,14 @@ class DomotiqueService:
                     data = await self._http_get(f"http://{ip}/rpc/Switch.GetStatus?id=0")
                     result[did] = {
                         "name": dev["name"], "type": dtype, "online": data is not None,
-                        "output": (data or {}).get("output"),
+                        "on": (data or {}).get("output", False),
                     }
                 elif dtype == "kasa_plug":
                     plug = await self._get_kasa()
                     if plug:
                         result[did] = {
                             "name": dev["name"], "type": dtype, "online": True,
-                            "is_on": plug.is_on,
+                            "on": plug.is_on,
                         }
                     else:
                         result[did] = {"name": dev["name"], "type": dtype, "online": False}
