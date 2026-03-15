@@ -24,15 +24,27 @@
     return `${m}:${sec.toString().padStart(2, '0')}`;
   }
 
+  // Local progress interpolation — smooth bar without polling
   let progressInterval;
+  let syncInterval;
   onMount(() => {
+    // Advance progress locally every second when playing
     progressInterval = setInterval(() => {
+      if (track.playing && track.duration_ms > 0) {
+        musicData.update(d => ({
+          ...d,
+          progress_ms: Math.min((d.progress_ms || 0) + 1000, d.duration_ms || 0),
+        }));
+      }
+    }, 1000);
+    // Sync with server every 15s to correct drift
+    syncInterval = setInterval(() => {
       if (track.playing) {
         sendWS({ type: 'music_progress' });
       }
-    }, 10000);
+    }, 15000);
   });
-  onDestroy(() => clearInterval(progressInterval));
+  onDestroy(() => { clearInterval(progressInterval); clearInterval(syncInterval); });
 
   const eqBars = 8;
   let showSearch = false;
@@ -40,9 +52,20 @@
   let searchQuery = '';
   let searchTimeout;
 
-  function togglePlay() { sendWS({ type: 'music_play_pause' }); }
-  function nextTrack() { sendWS({ type: 'music_next' }); }
-  function prevTrack() { sendWS({ type: 'music_prev' }); }
+  function togglePlay() {
+    // Optimistic UI — toggle immediately, server will confirm
+    musicData.update(d => ({ ...d, playing: !d.playing }));
+    sendWS({ type: 'music_play_pause' });
+  }
+  function nextTrack() {
+    // Optimistic — show loading state
+    musicData.update(d => ({ ...d, title: '...', artist: 'Chargement' }));
+    sendWS({ type: 'music_next' });
+  }
+  function prevTrack() {
+    musicData.update(d => ({ ...d, title: '...', artist: 'Chargement' }));
+    sendWS({ type: 'music_prev' });
+  }
   function refreshQueue() { sendWS({ type: 'music_queue' }); }
 
   let volumeTimeout;
