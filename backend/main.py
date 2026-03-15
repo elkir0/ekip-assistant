@@ -710,6 +710,20 @@ async def _set_audio_sink(sink_name: str) -> dict:
 
 # --- App lifecycle ---
 
+async def _start_devialet():
+    try:
+        await devialet.start()
+    except Exception as e:
+        logger.error("[DEVIALET] Erreur demarrage: %s", e)
+
+
+async def _start_domotique():
+    try:
+        await domotique.start()
+    except Exception as e:
+        logger.error("[DOMOTIQUE] Erreur demarrage: %s", e)
+
+
 async def _delayed_shutdown():
     """Shutdown the Pi after a short delay."""
     await asyncio.sleep(2)
@@ -776,8 +790,9 @@ async def lifespan(app: FastAPI):
     # Start Spotify in background — don't block server startup on rate limits
     asyncio.create_task(_start_spotify())
     await cameras.start()
-    await devialet.start()
-    await domotique.start()
+    # Start Devialet and Domotique in background (network scans are slow)
+    asyncio.create_task(_start_devialet())
+    asyncio.create_task(_start_domotique())
     await llm.start()
     await tts.start()
     # Connect YouTube ↔ Spotify: pause music when video plays, resume when stops
