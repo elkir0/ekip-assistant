@@ -20,6 +20,7 @@ export const youtubeError = writable('');
 export const camerasData = writable([]);
 export const fullscreenCam = writable(null);
 export const devialetData = writable(null);
+export const domotiqueData = writable(null);
 export const showSettings = writable(false);
 export const audioSinks = writable({ default: '', sinks: [] });
 
@@ -124,6 +125,9 @@ export function connectWS() {
         break;
       case 'devialet_status':
         devialetData.set(msg.data);
+        break;
+      case 'domotique_status':
+        domotiqueData.set(msg.data);
         break;
     }
   };

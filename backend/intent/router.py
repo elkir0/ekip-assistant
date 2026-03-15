@@ -57,6 +57,16 @@ INTENT_KEYWORDS = {
     "REPEAT": ["repete", "répète", "redis", "repeter", "répéter", "redit"],
     "CANCEL": ["annule", "non merci", "rien", "laisse tomber", "oublie"],
     "TIMER": ["minuteur", "timer", "chrono", "rappelle moi dans", "dans minutes"],
+    # Domotique
+    "DOMOTIQUE_VOLETS_OPEN": ["ouvre les volets", "ouvrir les volets", "leve les volets", "lève les volets",
+                               "monte les volets"],
+    "DOMOTIQUE_VOLETS_CLOSE": ["ferme les volets", "fermer les volets", "baisse les volets",
+                                "descends les volets"],
+    "DOMOTIQUE_PORTAIL": ["ouvre le portail", "ouvrir le portail", "ferme le portail",
+                           "fermer le portail", "portail"],
+    "DOMOTIQUE_GUINGUETTE_ON": ["allume la guinguette", "allumer la guinguette"],
+    "DOMOTIQUE_GUINGUETTE_OFF": ["eteins la guinguette", "éteins la guinguette",
+                                  "eteindre la guinguette", "éteindre la guinguette"],
     # Social
     "GREETING": ["bonjour", "salut", "coucou", "hello", "hey"],
     "THANKS": ["merci", "super", "genial", "génial", "parfait", "cool", "top"],
@@ -69,6 +79,8 @@ PRIORITY_INTENTS = {
     "MUSIC_NEXT", "MUSIC_PREV", "MUSIC_PAUSE", "MUSIC_RESUME",
     "MUSIC_WHAT", "YOUTUBE_STOP", "CANCEL", "REPEAT", "TIME",
     "GREETING", "THANKS",
+    "DOMOTIQUE_VOLETS_OPEN", "DOMOTIQUE_VOLETS_CLOSE",
+    "DOMOTIQUE_PORTAIL", "DOMOTIQUE_GUINGUETTE_ON", "DOMOTIQUE_GUINGUETTE_OFF",
 }
 
 # Keywords that should NEVER trigger MUSIC_PLAY (they have "mets" or "musique" but mean something else)

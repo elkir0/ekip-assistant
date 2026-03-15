@@ -6,6 +6,7 @@
   import YouTube from './pages/YouTube.svelte';
   import Cameras from './pages/Cameras.svelte';
   import Devialet from './pages/Devialet.svelte';
+  import Domotique from './pages/Domotique.svelte';
   import WaveAnimation from './components/WaveAnimation.svelte';
 
   const pages = [
@@ -13,7 +14,8 @@
     { name: 'Meteo' },
     { name: 'YouTube' },
     { name: 'Cameras' },
-    { name: 'Devialet' }
+    { name: 'Devialet' },
+    { name: 'Maison' }
   ];
 
   let touchStartX = 0;
@@ -46,7 +48,7 @@
     swiping = false;
 
     if (Math.abs(touchDeltaX) > 60) {
-      if (touchDeltaX < 0 && $currentPage < 4) {
+      if (touchDeltaX < 0 && $currentPage < 5) {
         currentPage.set($currentPage + 1);
       } else if (touchDeltaX > 0 && $currentPage > 0) {
         currentPage.set($currentPage - 1);
@@ -113,6 +115,7 @@
     <div class="page" class:page-hidden={$currentPage !== 2}><YouTube /></div>
     <div class="page" class:page-hidden={$currentPage !== 3}><Cameras /></div>
     <div class="page" class:page-hidden={$currentPage !== 4}><Devialet /></div>
+    <div class="page" class:page-hidden={$currentPage !== 5}><Domotique /></div>
   </div>
 
   <nav class="indicators">

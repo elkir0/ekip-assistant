@@ -70,6 +70,12 @@
       <span class="cam-count">{statusLabel($camerasData)}</span>
     </div>
 
+    <!-- Portail toggle -->
+    <button class="portail-btn" on:click={() => sendWS({ type: 'domotique_portail' })}>
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M6 2v20H4V2h2zm14 0v20h-2V2h2zm-7 4h-2v2H9v2h2v2h2v-2h2V8h-2V6z"/></svg>
+      Portail
+    </button>
+
     <!-- Grid -->
     <div class="cam-grid" class:grid-1={$camerasData.length === 1} class:grid-2={$camerasData.length === 2} class:grid-3={$camerasData.length === 3} class:grid-4={$camerasData.length >= 4}>
       {#each $camerasData as cam, i}
@@ -160,6 +166,26 @@
     border-radius: 10px;
     font-weight: 500;
   }
+
+  /* Portail button */
+  .portail-btn {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: rgba(108, 99, 255, 0.15);
+    border: 1px solid rgba(108, 99, 255, 0.3);
+    color: #6c63ff;
+    font-size: 13px;
+    font-weight: 600;
+    padding: 10px 24px;
+    border-radius: 10px;
+    cursor: pointer;
+    font-family: 'Inter', sans-serif;
+    -webkit-tap-highlight-color: transparent;
+    margin-bottom: 12px;
+    min-height: 44px;
+  }
+  .portail-btn:active { opacity: 0.7; transform: scale(0.95); }
 
   /* Grid layouts */
   .cam-grid {

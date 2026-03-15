@@ -17,6 +17,7 @@ from services.weather import WeatherService
 from services.youtube import YouTubeController
 from services.cameras import CameraService
 from services.devialet import DevialetService
+from services.domotique import DomotiqueService
 from services.llm import LLMHandler
 from services.tts import TTSEngine
 from intent.router import route, extract_volume_value, extract_timer_minutes
@@ -36,6 +37,7 @@ weather = WeatherService()
 youtube = YouTubeController()
 cameras = CameraService()
 devialet = DevialetService()
+domotique = DomotiqueService()
 llm = LLMHandler()
 tts = TTSEngine()
 
@@ -255,6 +257,31 @@ async def handle_cancel(_query: str):
     await speak("D'accord, j'annule")
 
 
+async def handle_volets_open(_query: str):
+    await domotique.open_all_rollers()
+    await speak("J'ouvre les volets")
+
+
+async def handle_volets_close(_query: str):
+    await domotique.close_all_rollers()
+    await speak("Je ferme les volets")
+
+
+async def handle_portail(_query: str):
+    await domotique.trigger_portail()
+    await speak("Portail actionne")
+
+
+async def handle_guinguette_on(_query: str):
+    await domotique.plug_on("guinguette")
+    await speak("Guinguette allumee")
+
+
+async def handle_guinguette_off(_query: str):
+    await domotique.plug_off("guinguette")
+    await speak("Guinguette eteinte")
+
+
 async def handle_greeting(_query: str):
     from datetime import datetime
     h = datetime.now().hour
@@ -428,6 +455,11 @@ INTENT_HANDLERS = {
     "REPEAT": handle_repeat,
     "CANCEL": handle_cancel,
     "TIMER": handle_timer,
+    "DOMOTIQUE_VOLETS_OPEN": handle_volets_open,
+    "DOMOTIQUE_VOLETS_CLOSE": handle_volets_close,
+    "DOMOTIQUE_PORTAIL": handle_portail,
+    "DOMOTIQUE_GUINGUETTE_ON": handle_guinguette_on,
+    "DOMOTIQUE_GUINGUETTE_OFF": handle_guinguette_off,
     "GREETING": handle_greeting,
     "THANKS": handle_thanks,
     "MUSIC_MUTE": handle_mute,
@@ -730,6 +762,7 @@ async def lifespan(app: FastAPI):
     asyncio.create_task(_start_spotify())
     await cameras.start()
     await devialet.start()
+    await domotique.start()
     await llm.start()
     await tts.start()
     # Connect YouTube ↔ Spotify: pause music when video plays, resume when stops
@@ -903,6 +936,43 @@ async def websocket_endpoint(ws: WebSocket):
             elif msg.get("type") == "weather_refresh":
                 data = await weather.get_current()
                 await ws.send_json({"type": "weather", "data": data})
+            elif msg.get("type") == "domotique_status":
+                status = await domotique.get_status()
+                await ws.send_json({"type": "domotique_status", "data": status})
+            elif msg.get("type") == "domotique_roller":
+                d = msg.get("data", {})
+                dev_id = d.get("id", "")
+                action = d.get("action", "")
+                if action == "open":
+                    await domotique.roller_open(dev_id)
+                elif action == "close":
+                    await domotique.roller_close(dev_id)
+                elif action == "stop":
+                    await domotique.roller_stop(dev_id)
+                status = await domotique.get_status()
+                await broadcast({"type": "domotique_status", "data": status})
+            elif msg.get("type") == "domotique_roller_all":
+                action = msg.get("data", "")
+                if action == "open":
+                    await domotique.open_all_rollers()
+                elif action == "close":
+                    await domotique.close_all_rollers()
+                status = await domotique.get_status()
+                await broadcast({"type": "domotique_status", "data": status})
+            elif msg.get("type") == "domotique_portail":
+                await domotique.trigger_portail()
+            elif msg.get("type") == "domotique_plug":
+                d = msg.get("data", {})
+                dev_id = d.get("id", "")
+                action = d.get("action", "")
+                if action == "on":
+                    await domotique.plug_on(dev_id)
+                elif action == "off":
+                    await domotique.plug_off(dev_id)
+                elif action == "toggle":
+                    await domotique.plug_toggle(dev_id)
+                status = await domotique.get_status()
+                await broadcast({"type": "domotique_status", "data": status})
             elif msg.get("type") == "devialet_status":
                 status = await devialet.get_status()
                 await ws.send_json({"type": "devialet_status", "data": status})
