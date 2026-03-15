@@ -710,6 +710,17 @@ async def _set_audio_sink(sink_name: str) -> dict:
 
 # --- App lifecycle ---
 
+async def _delayed_shutdown():
+    """Shutdown the Pi after a short delay."""
+    await asyncio.sleep(2)
+    proc = await asyncio.create_subprocess_exec(
+        "sudo", "shutdown", "-h", "now",
+        stdout=asyncio.subprocess.DEVNULL,
+        stderr=asyncio.subprocess.DEVNULL,
+    )
+    await proc.wait()
+
+
 async def _start_spotify():
     """Start Spotify in background so rate limits don't block server startup."""
     try:
@@ -940,6 +951,10 @@ async def websocket_endpoint(ws: WebSocket):
             elif msg.get("type") == "weather_refresh":
                 data = await weather.get_current()
                 await ws.send_json({"type": "weather", "data": data})
+            elif msg.get("type") == "system_shutdown":
+                logger.info("[SYSTEM] Shutdown demande par l'utilisateur")
+                await ws.send_json({"type": "speaking", "data": "Extinction en cours..."})
+                asyncio.create_task(_delayed_shutdown())
             elif msg.get("type") == "domotique_status":
                 status = await domotique.get_status()
                 await ws.send_json({"type": "domotique_status", "data": status})
