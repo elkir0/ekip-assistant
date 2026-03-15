@@ -2,6 +2,7 @@ import asyncio
 import logging
 import os
 import time
+from concurrent.futures import ThreadPoolExecutor
 import numpy as np
 from typing import Callable, Awaitable
 
@@ -128,6 +129,8 @@ class WakeWordDetector:
         """
         buffer = np.array([], dtype=np.int16)
         loop = asyncio.get_event_loop()
+        # Single-thread pool — prevents EWN from eating all CPU cores
+        ewn_pool = ThreadPoolExecutor(max_workers=1)
 
         while self.running:
             try:
@@ -147,8 +150,12 @@ class WakeWordDetector:
 
             buffer = np.concatenate([buffer, chunk])
 
-            # Process full frames (1.5s each, no overlap = half the CPU)
-            while len(buffer) >= EWN_FRAME_SIZE:
+            # Process ONE frame at a time, skip excess buffer to save CPU
+            if len(buffer) >= EWN_FRAME_SIZE:
+                # If buffer is way too full, skip to latest frame (drop old audio)
+                if len(buffer) > EWN_FRAME_SIZE * 3:
+                    buffer = buffer[-(EWN_FRAME_SIZE):]
+
                 frame = buffer[:EWN_FRAME_SIZE]
                 buffer = buffer[EWN_FRAME_SIZE:]
 
@@ -157,7 +164,7 @@ class WakeWordDetector:
                 try:
                     # Run inference in thread pool — don't block event loop
                     result = await loop.run_in_executor(
-                        None, lambda f=frame: self._detector.scoreFrame(f, unsafe=True)
+                        ewn_pool, lambda f=frame: self._detector.scoreFrame(f, unsafe=True)
                     )
 
                     self._debug_counter += 1
@@ -171,17 +178,18 @@ class WakeWordDetector:
                         if matched:
                             now = time.monotonic()
                             if now - self._last_trigger < self._cooldown:
-                                continue
-                            self._last_trigger = now
-                            logger.info("[WAKEWORD] Detecte! (EWN conf=%.2f)", confidence)
-                            if self.on_wake:
-                                await self.on_wake()
+                                pass
+                            else:
+                                self._last_trigger = now
+                                logger.info("[WAKEWORD] Detecte! (EWN conf=%.2f)", confidence)
+                                if self.on_wake:
+                                    await self.on_wake()
                     else:
                         if self._debug_counter % 25 == 0:
                             logger.info("[WAKEWORD] %s (silence, rms=%d)", WAKEWORD_NAME, rms)
 
-                    # Yield CPU after inference — lets PipeWire/AirPlay breathe
-                    await asyncio.sleep(0.05)
+                    # Long pause after inference — 500ms gives CPU ~40% instead of ~95%
+                    await asyncio.sleep(0.5)
 
                 except Exception as e:
                     if self._debug_counter % 100 == 0:

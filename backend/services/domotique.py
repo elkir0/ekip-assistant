@@ -113,9 +113,10 @@ class DomotiqueService:
                 pass
             return None
 
-        # Probe known IPs first
-        tasks = [probe_shelly(ip) for ip in known_ips]
-        results = await asyncio.gather(*tasks)
+        # Probe known IPs sequentially (don't overload Pi CPU)
+        results = []
+        for ip in known_ips:
+            results.append(await probe_shelly(ip))
 
         found_count = 0
         for result in results:
@@ -131,31 +132,10 @@ class DomotiqueService:
                     dev["ip"] = full_ip
                     found_count += 1
 
-        # If not all Shelly found, scan remaining IPs (batches of 20)
-        shelly_needed = sum(1 for d in self.DEVICES.values() if d["type"].startswith("shelly") and not d.get("ip"))
-        if shelly_needed > 0:
-            remaining = [ip for ip in range(1, 255) if ip not in known_ips]
-            for batch_start in range(0, len(remaining), 20):
-                batch = remaining[batch_start:batch_start + 20]
-                batch_results = await asyncio.gather(*[probe_shelly(ip) for ip in batch])
-                for result in batch_results:
-                    if not result:
-                        continue
-                    ip_num, mac, dev_id = result
-                    full_ip = f"192.168.1.{ip_num}"
-                    for did, dev in self.DEVICES.items():
-                        if dev.get("mac") and mac.upper() == dev["mac"].upper():
-                            dev["ip"] = full_ip
-                        elif dev.get("id") and dev_id == dev["id"]:
-                            dev["ip"] = full_ip
-                # Stop scanning if all found
-                if all(d.get("ip") for d in self.DEVICES.values() if d["type"].startswith("shelly")):
-                    break
-
         # Discover Kasa via python-kasa
         try:
             from kasa import Discover
-            found = await Discover.discover(timeout=3)
+            found = await Discover.discover(timeout=2)
             for addr, device in found.items():
                 await device.update()
                 if "guinguette" in (device.alias or "").lower() or "hs100" in (device.model or "").lower():

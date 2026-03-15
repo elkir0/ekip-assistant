@@ -24,6 +24,10 @@ from intent.router import route, extract_volume_value, extract_timer_minutes
 from memory.context import memory
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
+
+# Limit default thread pool to prevent CPU saturation on Pi 4
+from concurrent.futures import ThreadPoolExecutor
+asyncio.get_event_loop().set_default_executor(ThreadPoolExecutor(max_workers=4))
 logger = logging.getLogger(__name__)
 
 # --- Shared state ---
@@ -790,9 +794,10 @@ async def lifespan(app: FastAPI):
     # Start Spotify in background — don't block server startup on rate limits
     asyncio.create_task(_start_spotify())
     await cameras.start()
-    # Start Devialet and Domotique in background (network scans are slow)
-    asyncio.create_task(_start_devialet())
-    asyncio.create_task(_start_domotique())
+    # Start Devialet and Domotique sequentially BEFORE voice pipeline
+    # (if done in parallel with wakeword, CPU spikes cause SIGKILL on Pi 4)
+    await _start_devialet()
+    await _start_domotique()
     await llm.start()
     await tts.start()
     # Connect YouTube ↔ Spotify: pause music when video plays, resume when stops
@@ -1242,4 +1247,16 @@ if frontend_path.exists():
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("main:app", host="0.0.0.0", port=BACKEND_PORT, reload=True)
+    import socket
+
+    # Create socket with SO_REUSEADDR to allow quick restart
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    sock.bind(("0.0.0.0", BACKEND_PORT))
+    sock.set_inheritable(True)
+
+    config = uvicorn.Config("main:app", host="0.0.0.0", port=BACKEND_PORT)
+    server = uvicorn.Server(config)
+
+    import asyncio
+    asyncio.run(server.serve(sockets=[sock]))
